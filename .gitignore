@@ -1,0 +1,8 @@
+build/
+__pycache__/
+.DS_Store
+# firmware packages (releases go on GitHub, not in the tree; keeps a stock firmware backup out too)
+*.fwsc
+# music is never part of the repo
+*.sid
+.wrangler/

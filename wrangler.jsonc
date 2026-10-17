@@ -1,0 +1,6 @@
+{
+  "name": "sid-1",
+  "compatibility_date": "2026-09-01",
+  "assets": { "directory": "./web" },
+  "routes": [{ "pattern": "sid-1.putch.co.uk", "custom_domain": true }]
+}

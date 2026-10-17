@@ -1,0 +1,2171 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SID-1: the FM-1's patch library and editor over USB-MIDI (WebMIDI: Chrome or Edge).
+     Serve it from localhost, which WebMIDI accepts as secure:  python3 -m http.server -d web 8000
+     then open http://localhost:8000/. Protocol: docs/MIDI.md and firmware/src/sid1.c. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SID-1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+/* a C64's screen: blue inside a light blue border, its 8x8 letters for the controls (Press Start 2P), VT323 for
+   reading; selected things in reverse, as the C64 shows them */
+:root {
+  --bg: #352879; --border: #7c70da; --panel: #352879; --soft: #3f3290; --line: #6c5eb5; --line2: #7c70da; --text: #c4beff; --dim: #9a90ec;
+  --faint: #7468cc; --acc: #7c70da; --acc-hi: #a69cf0; --acc-dk: #2a1f66; --pink: #ffffff; --good: #9ad284; --warn: #d6e08f;
+  --c0: #a69cf0; --c1: #d6e08f; --c2: #8fd0e0; --c3: #f0949a;
+  --pixel: "Press Start 2P", ui-monospace, monospace;
+  --mono: "VT323", ui-monospace, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--border); }
+body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font: 20px/1.25 var(--mono);
+  border: clamp(10px, 3vw, 36px) solid var(--border); }
+a { color: var(--pink); }
+.chrome { font-family: var(--pixel); font-weight: 400; text-transform: uppercase; color: #fff; }
+.mono { font-family: var(--mono); letter-spacing: 1px; }
+.hide { display: none !important; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; padding: 18px 28px 14px; border-bottom: 4px solid var(--line2); }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .chrome { font-size: 24px; line-height: 1; }
+.badge { font: 10px var(--pixel); padding: 5px 6px; background: var(--acc-hi); color: var(--bg); text-transform: uppercase; }
+nav { display: flex; flex-wrap: wrap; gap: 4px; }
+nav button { background: none; border: 0; color: var(--dim); padding: 10px 12px; cursor: pointer; font: 12px var(--pixel); text-transform: uppercase; min-height: 44px; }
+nav button:hover { color: #fff; }
+nav button.on { background: var(--acc-hi); color: var(--bg); }
+.grow { flex: 1; }
+.conn { display: flex; align-items: center; gap: 10px; font: 10px var(--pixel); text-transform: uppercase; background: none; border: 0; color: var(--text); cursor: pointer; min-height: 44px; }
+.conn .dot { width: 12px; height: 12px; background: var(--faint); }
+.conn.ok .dot { background: var(--good); }
+.conn.err .dot { background: var(--c3); }
+.statusbar { max-width: 1376px; margin: 16px auto 0; padding: 0 28px; display: flex; gap: 14px; align-items: center; min-height: 26px; }
+#status { font: 20px var(--mono); color: var(--text); flex: 1; text-transform: uppercase; }
+#status::after { content: ""; display: inline-block; width: .55em; height: .9em; margin-left: 4px; vertical-align: -2px; background: currentColor; }
+#status.ok { color: var(--good); } #status.err { color: var(--c3); }
+.progress { width: 220px; height: 12px; background: var(--acc-dk); border: 2px solid var(--line2); }
+.progress div { height: 100%; width: 0; background: var(--acc-hi); }
+dialog#done { background: var(--bg); color: var(--text); border: 6px solid var(--line2); border-radius: 0; padding: 22px 24px; width: min(460px, calc(100vw - 32px)); }
+dialog#done::backdrop { background: rgba(20, 14, 60, .75); }
+#donetitle { font-size: 16px; margin: 0; }
+#donetext { font: 20px var(--mono); line-height: 1.3; margin: 14px 0 18px; }
+#donetext.ok { color: var(--good); } #donetext.err { color: var(--c3); }
+main { max-width: 1376px; margin: 0 auto; padding: 16px 28px 48px; }
+.tab { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.panel { background: var(--panel); border: 2px solid var(--line2); padding: 22px 24px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.panel h2 { margin: 0; font-size: 16px; line-height: 1.4; }
+.panel h3, .card h3 { margin: 0; font: 12px/1.5 var(--pixel); text-transform: uppercase; color: #fff; }
+.phead { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: space-between; align-items: center; }
+.sub { color: var(--dim); font-size: 20px; margin: 0; }
+.cap { font: 10px/1.6 var(--pixel); color: var(--dim); text-transform: uppercase; }
+button.btn { min-height: 44px; padding: 0 14px; border: 2px solid var(--line2); background: var(--bg); color: var(--text); cursor: pointer;
+  font: 10px var(--pixel); text-transform: uppercase; border-radius: 0; }
+button.btn:hover { background: var(--line2); color: var(--bg); }
+button.btn:disabled { opacity: .45; cursor: default; background: var(--bg); color: var(--text); }
+button.btn.go { background: var(--acc-hi); border-color: var(--acc-hi); color: var(--bg); }
+button.btn.go:hover { background: #fff; border-color: #fff; }
+button.btn.danger { color: var(--c3); border-color: var(--c3); }
+button.btn.danger:hover { background: var(--c3); color: var(--bg); }
+button.btn.small { min-height: 34px; padding: 0 10px; font-size: 9px; }
+button.btn.on { background: var(--acc-hi); border-color: var(--acc-hi); color: var(--bg); }
+select, input[type=text], input[type=number] { min-height: 44px; padding: 0 10px; background: var(--acc-dk); color: #fff; border: 2px solid var(--line2); border-radius: 0; font: 20px var(--mono); }
+label.field { display: flex; flex-direction: column; gap: 6px; font: 10px var(--pixel); color: var(--dim); text-transform: uppercase; }
+input[type=range] { accent-color: var(--acc-hi); width: 100%; }
+.menu { display: inline-block; max-width: 100%; }
+.menubtn { min-height: 44px; min-width: 100%; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 0 32px 0 10px; background: var(--acc-dk); color: #fff; border: 2px solid var(--line2); font: 20px var(--mono); text-align: left; cursor: pointer; position: relative; white-space: nowrap; }
+.menubtn::after { content: ""; position: absolute; right: 10px; top: 50%; margin-top: -3px; border: 6px solid transparent; border-top-color: currentColor; border-bottom: 0; }
+.menulist { position: fixed; z-index: 20; max-width: calc(100vw - 16px); overflow-y: auto; display: flex; flex-direction: column; background: var(--acc-dk); border: 2px solid var(--line2); }
+.menulist button { min-height: 36px; padding: 0 10px; background: none; border: 0; color: var(--text); font: 20px var(--mono); text-align: left; white-space: nowrap; cursor: pointer; }
+.menulist button.on { color: #fff; }
+.menulist button:hover, .menulist button:focus { background: var(--acc-hi); color: var(--bg); outline: none; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.banks { display: flex; gap: 6px; flex-wrap: wrap; }
+.banks button { min-height: 44px; padding: 0 12px; border: 2px solid var(--line2); background: var(--bg); color: #fff; cursor: pointer; display: flex; gap: 10px; align-items: center; font: 12px var(--pixel); }
+.banks button span { font: 18px var(--mono); color: var(--dim); }
+.banks button.on { background: var(--acc-hi); border-color: var(--acc-hi); color: var(--bg); }
+.banks button.on span { color: var(--bg); }
+.slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.slot { min-height: 60px; text-align: left; padding: 8px 10px; border: 2px solid var(--line); background: var(--soft); color: var(--text); cursor: pointer;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 6px; font: 18px var(--mono); min-width: 0; }
+.slot .n { display: flex; justify-content: space-between; font: 18px var(--mono); color: var(--dim); }
+.slot .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 10px/1.4 var(--pixel); color: #fff; }
+.slot.empty { background: transparent; border-style: dashed; } .slot.empty .t { color: var(--faint); }
+.slot.clip { border-color: var(--warn); }
+.slot.incoming { border-color: var(--warn); } .slot.incoming .t { color: var(--warn); }
+.drop { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px; border: 2px dashed var(--line2); background: var(--acc-dk); cursor: pointer; text-align: center; }
+.drop.over { border-color: #fff; }
+.drop b { font: 12px var(--pixel); font-weight: 400; text-transform: uppercase; color: #fff; }
+.list { display: flex; flex-direction: column; gap: 6px; max-height: 460px; overflow-y: auto; }
+.item { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; background: var(--soft); border: 2px solid var(--line); border-left: 8px solid var(--acc-hi); }
+.item.off { border-left-color: var(--line); opacity: .6; }
+.item input[type=text] { min-height: 34px; width: 140px; padding: 0 8px; text-transform: uppercase; }
+.item input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--acc-hi); }
+.item .meta { font: 18px var(--mono); color: var(--dim); flex: 1 1 160px; }
+.slot.sel { background: var(--acc-hi); border-color: var(--acc-hi); } .slot.sel .n, .slot.sel .t { color: var(--bg); }
+.slot.now .n span:first-child::after { content: " PLAYING"; color: var(--good); }
+.slot.sel.now .n span:first-child::after { color: var(--bg); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; flex: 1 1 100%; }
+.card { background: var(--panel); border: 2px solid var(--line2); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.graph { background: var(--acc-dk); border: 2px solid var(--line); width: 100%; height: 110px; display: block; }
+.sliders { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+.sl { display: flex; flex-direction: column; gap: 2px; font: 18px var(--mono); color: var(--dim); text-transform: uppercase; }
+.sl > span { display: flex; justify-content: space-between; } .sl output { color: #fff; }
+.toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.toggles button { min-height: 36px; padding: 0 10px; border: 2px solid var(--line2); background: var(--bg); color: var(--dim); cursor: pointer; font: 9px var(--pixel); text-transform: uppercase; }
+.toggles button.on { background: var(--acc-hi); border-color: var(--acc-hi); color: var(--bg); }
+table.wt { border-collapse: collapse; width: 100%; font: 18px var(--mono); }
+table.wt th { text-align: left; color: var(--dim); font: 9px var(--pixel); text-transform: uppercase; padding: 6px 4px; border-bottom: 2px solid var(--line); }
+table.wt td { padding: 3px 4px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.wt tr.off td { opacity: .4; }
+table.wt select, table.wt input[type=number] { min-height: 32px; padding: 0 6px; font: 18px var(--mono); width: 100%; }
+table.wt .menu { display: block; } table.wt .menubtn { min-height: 32px; font-size: 18px; padding-left: 6px; }
+table.wt input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--acc-hi); }
+.kbwrap { overflow-x: auto; padding-bottom: 4px; }
+.kb { position: relative; height: 130px; user-select: none; touch-action: none; }
+.key { position: absolute; top: 0; border: 2px solid var(--bg); display: flex; align-items: flex-end; justify-content: center; font: 16px var(--mono); padding-bottom: 6px; }
+.key.w { background: #e8e6f8; color: var(--line); height: 130px; z-index: 1; }
+.key.b { background: #1a1440; height: 80px; z-index: 2; }
+.key.down { background: var(--acc-hi) !important; color: #fff; }
+.setups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.setups button { display: flex; flex-direction: column; justify-content: flex-start; text-align: left; border: 2px solid var(--line2); background: var(--bg); color: var(--text); padding: 12px 14px; cursor: pointer; font: 18px/1.2 var(--mono); }
+.setups button b { display: block; line-height: 1.4; font: 12px var(--pixel); font-weight: 400; text-transform: uppercase; margin-bottom: 8px; color: #fff; }
+.setups button span { color: var(--dim); }
+.setups button.on { background: var(--acc-hi); border-color: var(--acc-hi); }
+.setups button.on b, .setups button.on span { color: var(--bg); }
+.tablewrap { overflow-x: auto; }
+table.parts { border-collapse: collapse; width: 100%; font-size: 20px; }
+table.parts th { text-align: left; font: 9px var(--pixel); color: var(--dim); text-transform: uppercase; padding: 8px; border-bottom: 2px solid var(--line); }
+table.parts td { padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.parts tr.ed td { background: var(--soft); }
+.warn { color: var(--warn); font-size: 20px; margin: 0; }
+.help h3 { margin: 20px 0 6px; }
+.help table { border-collapse: collapse; width: 100%; font-size: 20px; }
+.help td, .help th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.help th { font: 9px var(--pixel); color: var(--dim); text-transform: uppercase; }
+.help code { font: 18px var(--mono); color: #fff; }
+@media (max-width: 700px) {
+  header, main, .statusbar { padding-left: 16px; padding-right: 16px; }
+  .slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel { padding: 16px; }
+  .cards { grid-template-columns: 1fr; }
+  .setups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="chrome">SID-1</span><span class="badge">2 x SID</span></div>
+  <nav id="nav">
+    <button data-tab="library" class="on">Library</button>
+    <button data-tab="editor">Editor</button>
+    <button data-tab="setup">Setup</button>
+    <button data-tab="help">Help</button>
+  </nav>
+  <div class="grow"></div>
+  <button id="pill" class="conn" title="The MIDI port (Help has the details)"><span class="dot"></span><span id="pilltext">STARTING</span></button>
+</header>
+<div class="statusbar">
+  <div id="status"></div>
+  <div class="progress hide" id="prog"><div id="progbar"></div></div>
+</div>
+<dialog id="done" aria-labelledby="donetitle">
+  <h2 class="chrome" id="donetitle"></h2>
+  <p id="donetext"></p>
+  <div class="progress" id="doneprog" style="width:100%"><div id="donebar"></div></div>
+  <div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn hide" id="donecancel">Cancel</button><button class="btn go" id="doneok">OK</button></div>
+</dialog>
+<main>
+  <!-- LIBRARY -->
+  <section class="tab" id="tab-library">
+    <div class="panel" style="flex: 1 1 420px">
+      <div class="phead"><h2 class="chrome">Import</h2><span class="cap">.sid tunes</span></div>
+      <label id="drop" class="drop">
+        <input type="file" id="sidfile" accept=".sid" hidden>
+        <b>Patches from a tune</b>
+        <span class="sub">Drop a .sid file from the HVSC, or click to choose. Its instruments become patches.</span>
+      </label>
+      <div id="impbox" class="hide" style="display:flex;flex-direction:column;gap:10px">
+        <div class="phead">
+          <span class="sub" id="imptune"></span>
+          <span class="row" style="gap:8px">
+            <label class="field">SONG <select id="impsong"></select></label>
+            <label class="field">LENGTH <select id="implen"><option value="60">1 min</option><option value="120">2 min</option><option value="180" selected>3 min</option><option value="300">5 min</option></select></label>
+          </span>
+        </div>
+        <div class="row" style="gap:8px;align-items:center">
+          <button class="btn" id="songplay">Play song</button>
+          <button class="btn" id="songmid">Save .mid</button>
+        </div>
+        <span class="sub" id="songnote"></span>
+        <div id="impkit" class="hide" style="display:flex;flex-direction:column;gap:6px">
+          <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="impdrums" checked><span class="sub" id="kitnote"></span></label>
+          <div class="row" style="gap:6px" id="kitlist"></div>
+        </div>
+        <div class="phead">
+          <span class="cap" id="impsum"></span>
+          <span class="row" style="gap:8px">
+            <button class="btn small" id="impall">All</button><button class="btn small" id="impnone">None</button>
+            <button class="btn small" id="impclear">Clear</button>
+          </span>
+        </div>
+        <div class="list" id="implist"></div>
+        <div class="row" style="padding:12px 0;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--panel);z-index:1">
+          <label class="field">BANK <select id="tbank"><option value="0">Bank 1</option><option value="1">Bank 2</option><option value="2">Bank 3</option><option value="3">Bank 4</option></select></label>
+          <label class="field">FROM SLOT <select id="tslot"></select></label>
+          <div class="grow sub" id="tnote" style="min-width:140px"></div>
+          <button class="btn go" id="sendimp">Send to FM-1</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel" style="flex: 999 1 620px">
+      <div class="phead">
+        <h2 class="chrome">On the FM-1</h2>
+        <div class="banks" id="banks" role="tablist" aria-label="Banks"></div>
+      </div>
+      <div class="slots" id="slots"></div>
+      <div class="row" style="align-items:center">
+        <span class="sub grow" id="slotinfo">Read the FM-1 to see its library.</span>
+        <input type="text" id="libname" maxlength="11" aria-label="Name" class="mono" style="width:150px;text-transform:uppercase">
+        <button class="btn" id="rename">Rename</button>
+        <button class="btn" id="editslot">Edit</button>
+        <button class="btn" id="copyslot">Copy</button>
+        <button class="btn" id="cutslot">Move</button>
+        <button class="btn" id="pasteslot">Paste</button>
+        <button class="btn danger" id="clearslot">Empty</button>
+      </div>
+      <div class="row" style="align-items:center;border-top:1px solid var(--line);padding-top:16px">
+        <span class="sub grow">A bank file is JSON: each patch's fields as docs/MIDI.md names them. Import fills the bank shown, or the slot picked for a single patch.</span>
+        <button class="btn" id="readlib">Read FM-1</button>
+        <button class="btn" id="exportbank">Export bank</button>
+        <button class="btn danger" id="emptybank">Empty bank</button>
+        <label class="btn" style="display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--line2);background:var(--bg);cursor:pointer;font:10px var(--pixel);text-transform:uppercase">
+          Import<input type="file" id="importfile" accept=".json,application/json" hidden></label>
+      </div>
+    </div>
+  </section>
+
+  <!-- EDITOR -->
+  <section class="tab hide" id="tab-editor">
+    <div class="panel" style="flex: 1 1 100%">
+      <div class="row" style="align-items:center;gap:24px">
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:220px">
+          <span class="cap" id="edwhere" style="color:var(--pink)"></span>
+          <input type="text" id="edname" maxlength="11" class="chrome" style="font-size:20px;min-height:48px;caret-color:#fff;background:none;border:0;border-bottom:2px solid var(--line2);padding:0;width:260px" aria-label="Patch name">
+        </div>
+        <label class="field">PATCH <select id="edslot" style="max-width:240px"></select></label>
+        <div class="grow"></div>
+        <div class="row" style="gap:8px">
+          <button class="btn" id="edexport">Export</button>
+          <button class="btn" id="edrevert">Revert</button>
+          <button class="btn go" id="edsave">Save</button>
+        </div>
+      </div>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div class="panel" style="flex: 1 1 100%">
+      <div class="phead"><span class="cap">PLAY IT</span>
+        <span class="row" style="gap:8px;align-items:center"><button class="btn small" id="octdn">Oct -</button><b id="octv" class="mono">C3</b><button class="btn small" id="octup">Oct +</button></span></div>
+      <div class="kbwrap"><div class="kb" id="kb"></div></div>
+      <p class="sub">The Editor works on the FM-1's edited part (Setup picks it). Picking a patch here also selects it on the FM-1, as PRESETS does, and the page follows PRESETS and the knobs on the FM-1. Changes play as you make them; Save writes the patch to its slot and keeps it in flash. Computer keys play too: Z to M and Q to U.</p>
+    </div>
+  </section>
+
+  <!-- SETUP -->
+  <section class="tab hide" id="tab-setup">
+    <div class="panel" style="flex: 1 1 100%">
+      <div class="phead">
+        <h2 class="chrome">Setup</h2>
+        <span class="row" style="gap:8px">
+          <button class="btn" id="readparts">Read FM-1</button>
+          <button class="btn go" id="keepparts" title="Keeps the setup after the FM-1 is switched off, as its SAVE button does">Save</button>
+        </span>
+      </div>
+      <div class="setups" id="setups"></div>
+      <div id="setupbody" style="display:flex;flex-direction:column;gap:12px"></div>
+    </div>
+  </section>
+
+  <!-- HELP -->
+  <section class="tab hide" id="tab-help">
+    <div class="panel help" style="flex: 1 1 100%">
+      <h2 class="chrome">Help</h2>
+      <h3>Getting started</h3>
+      <ol>
+        <li>Install the SID-1 firmware on the FM-1 (see the README: <code>tools/fm1_install.py</code>).</li>
+        <li>Plug the FM-1 in with USB and open this page in Chrome or Edge. Allow MIDI when the browser asks.</li>
+        <li>The page reads the FM-1's library. Pick a slot and press Edit, or open the Editor: changes play on the FM-1 as you make them.</li>
+        <li>Save writes the patch to its slot and keeps the library in flash. The sound drops out for a moment while it does.</li>
+      </ol>
+      <p class="sub">Installing custom firmware is done at your own risk. It comes with no warranty, and its authors accept no responsibility for damaged or unusable devices.</p>
+      <h3>Songs</h3>
+      <p class="sub">Drop a .sid tune in Import. Play song sends the ticked patches to their slots if they are not there yet, switches the FM-1 to voices mode (Setup) and plays the tune as MIDI: each SID voice on its MIDI channel (1 to 6), a program change when its instrument changes, slides as pitch bend (12 semitones each way). Drums a tune plays through the volume register (sampled, or as Arkanoid's) are found as samples: ticked, they go to the FM-1's kit with the patches, replacing the one there, and play on MIDI channel 10, the 6581 only. Stop puts the FM-1 back as it was. Save .mid writes the same notes as a MIDI file for a DAW or sequencer; it needs the same patches in the same slots, and the FM-1 in voices mode.</p>
+      <h3>MIDI port</h3>
+      <label class="field" style="max-width:360px">MIDI OUTPUT <select id="out"><option>none</option></select></label>
+      <h3>On the FM-1</h3>
+      <table>
+        <tr><th>Control</th><th>What it does</th></tr>
+        <tr><td>PRESETS</td><td>Steps the edited part through the library's patches, skipping empty slots. A MIDI program change on a part's channel picks its slot</td></tr>
+        <tr><td>HOME</td><td>Cutoff, resonance, pulse width, release</td></tr>
+        <tr><td>ENV</td><td>Attack, decay, sustain, release</td></tr>
+        <tr><td>EDIT</td><td>Transpose, fine tune, filter on or off, sync, ring and hard restart</td></tr>
+        <tr><td>FX</td><td>The pulse sweep: speed, min, max, start. Again: the filter sweep: cutoff, speed, end, resonance</td></tr>
+        <tr><td>LFO</td><td>Vibrato: delay, speed, depth</td></tr>
+        <tr><td>ARP</td><td>The wavetable: step (SEL steps too), note, absolute or relative, length. Again: its loop</td></tr>
+        <tr><td>GLO</td><td>Chip model (6581 or 8580), 2x oversampling, the part the keys and knobs play and edit, and the mode (parts or voices); lists the parts and shows the audio load</td></tr>
+        <tr><td>ALGORITHM</td><td>The waveform; on EDIT and the filter page the filter mode; on the wavetable pages the step's waveform</td></tr>
+        <tr><td>SAVE</td><td>Keeps the edited patch in its slot, and the setup</td></tr>
+      </table>
+      <h3>If something goes wrong</h3>
+      <table>
+        <tr><td>MIDI not allowed</td><td>Allow MIDI for this page in the browser's site settings and reload. Open it from https or localhost.</td></tr>
+        <tr><td>FM-1 not found</td><td>Check the cable, and the MIDI output above.</td></tr>
+        <tr><td>Needs SID-1</td><td>The FM-1 runs other firmware (the stock one, or another custom firmware). Install SID-1.</td></tr>
+        <tr><td>Notes stuck on</td><td><button class="btn small" id="panic">Panic</button></td></tr>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+const NSLOT = 128, BANK_SLOTS = 32, SIZE = 50, WT_MAX = 8;
+// the patch's bytes, as docs/MIDI.md section 3 (sid1.c's patch_t)
+const F = { ad: 12, sr: 13, wave: 14, flags: 15, pw_hi: 16, pw_lo: 17, pw_speed: 18, pw_min: 19, pw_max: 20, mode: 21, res: 22,
+  cut: 23, cut_speed: 24, cut_end: 25, transpose: 26, fine: 27, vib_delay: 28, vib_speed: 29, vib_depth: 30, wt_len: 31,
+  wt_loop: 32, wt_abs: 33, wt_ctl: 34, wt_note: 42 };
+const SIGNED = new Set(["pw_speed", "cut_speed", "transpose", "fine"]);
+const PF_FILTER = 1, PF_HARD = 2;
+const state = {
+  out: null, oct: 3, vel: 110,
+  lib: Array(NSLOT).fill(undefined),            // the FM-1's slots as read: undefined unknown, null empty, else 50 bytes
+  bank: 0, sel: -1, clip: null,                 // clip: { b, from, move }
+  ed: { b: null, slot: 0, base: null },         // base: the bytes as last saved or read, for Revert
+  fw: null,                                     // the FM-1's SID-1: "1.0.0" or "DEV", false if not SID-1, null unknown
+  quiet: 0,                                     // until then, a 3C for the slot the page picked is the page's own
+  parts: Array.from({ length: 6 }, (_, p) => ({ chan: p ? 16 : 17, slot: 0 })), mode: 0, edPart: 0, partsKnown: false,
+};
+const $ = id => document.getElementById(id);
+function send(bytes) { if (state.out) state.out.send(bytes); }
+const cc16 = (c, v) => send([0xBF, c, v & 127]);
+function setStatus(t, cls) {
+  const s = $("status"); s.textContent = t; s.className = cls || "";
+  if ($("done").open) { $("donetext").textContent = t; $("donetext").className = cls || ""; }
+}
+function setProgress(f) {                       // 0..1, or null to hide
+  $("prog").classList.toggle("hide", f === null);
+  if (f !== null) $("progbar").style.width = $("donebar").style.width = (100 * Math.max(0, Math.min(1, f))).toFixed(1) + "%";
+}
+let answer = null;                              // the open question's resolve
+function ask(title, text, yes) {                // a question in the popup: true if yes
+  $("donetitle").textContent = title;
+  $("donetext").textContent = text; $("donetext").className = "";
+  $("doneprog").classList.add("hide");
+  $("doneok").textContent = yes; $("doneok").disabled = false;
+  $("donecancel").classList.remove("hide");
+  if (!$("done").open) $("done").showModal();
+  $("donecancel").focus();
+  return new Promise(r => { answer = r; });
+}
+function answered(yes) {
+  const r = answer;
+  answer = null;
+  $("donecancel").classList.add("hide");
+  $("doneok").textContent = "OK";
+  if (!yes) $("done").close();
+  r(yes);
+}
+async function shownJob(what, fn) {             // a transfer in the popup, so its outcome is seen wherever the page is
+  const d = $("done");
+  $("donetitle").textContent = what + "...";
+  $("donetext").textContent = ""; $("donetext").className = "";
+  $("donebar").style.width = "0";
+  $("doneprog").classList.remove("hide");
+  $("doneok").disabled = true;
+  if (!d.open) d.showModal();
+  await job(what, fn);
+  $("donetitle").textContent = $("status").className === "err" ? "Not done" : "Done";
+  $("doneprog").classList.add("hide");
+  $("doneok").disabled = false;
+  $("doneok").focus();
+}
+$("doneok").onclick = () => answer ? answered(true) : $("done").close();
+$("donecancel").onclick = () => answered(false);
+$("done").oncancel = e => {                     // Esc: no to a question; closes only once a transfer has finished
+  if (answer) { e.preventDefault(); answered(false); } else if ($("doneok").disabled) e.preventDefault();
+};
+const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const noteName = n => NAMES[n % 12] + (Math.floor(n / 12) - 1);
+const slotName = s => `B${(s >> 5) + 1} ${String((s & 31) + 1).padStart(2, "0")}`;
+const s8 = x => x << 24 >> 24;
+function el(tag, props = {}, ...kids) {         // a DOM element, its properties, its children
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v;
+    else if (k.startsWith("on")) e[k] = v; else if (k in e) e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k);
+  return e;
+}
+// every <select>'s list drawn by the page, opened once the click is over: Chrome's own list could take the release of
+// the opening click as a pick. Each select stays, hidden, holding the value and firing change; new ones are caught
+// as they are added. The list floats over the page (fixed), so a scrolling table does not cut it off
+let menuClose = null;
+function menuFor(sel) {
+  const btn = el("button", { type: "button", class: "menubtn", "aria-haspopup": "listbox", "aria-expanded": "false" });
+  const list = el("div", { class: "menulist hide", role: "listbox" }), wrap = el("span", { class: "menu" }, btn, list);
+  if (sel.getAttribute("aria-label")) btn.setAttribute("aria-label", sel.getAttribute("aria-label"));
+  wrap.style.cssText = sel.style.cssText;
+  const show = () => { btn.textContent = sel.selectedOptions[0]?.text ?? ""; btn.disabled = sel.disabled; };
+  const value = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+  Object.defineProperty(sel, "value", { get: () => value.get.call(sel), set: v => { value.set.call(sel, v); show(); } });
+  sel.focus = () => btn.focus();
+  new MutationObserver(show).observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled"] });
+  const close = () => { list.classList.add("hide"); btn.setAttribute("aria-expanded", "false"); if (menuClose === close) menuClose = null; };
+  const pick = i => {
+    close(); btn.focus();
+    if (i !== sel.selectedIndex) { sel.selectedIndex = i; show(); sel.dispatchEvent(new Event("change")); }
+  };
+  btn.onclick = () => {
+    if (!list.classList.contains("hide")) { close(); return; }
+    menuClose?.();
+    list.replaceChildren(...[...sel.options].map((o, i) => el("button", { type: "button", role: "option", class: i === sel.selectedIndex ? "on" : "",
+      "aria-selected": String(i === sel.selectedIndex), onclick: () => pick(i) }, o.text)));
+    const r = btn.getBoundingClientRect(), below = innerHeight - r.bottom - 8, above = r.top - 8;
+    list.style.left = r.left + "px"; list.style.minWidth = r.width + "px";
+    list.classList.remove("hide");
+    const up = list.scrollHeight > below && above > below, room = Math.max(120, up ? above : below);
+    list.style.maxHeight = Math.min(320, room) + "px";
+    list.style.top = (up ? r.top - Math.min(list.scrollHeight + 4, Math.min(320, room)) : r.bottom) + "px";
+    btn.setAttribute("aria-expanded", "true");
+    menuClose = close;
+    list.children[Math.max(0, sel.selectedIndex)]?.focus();
+  };
+  list.onkeydown = e => {
+    const k = [...list.children].indexOf(document.activeElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); list.children[clamp(k + (e.key === "ArrowDown" ? 1 : -1), 0, list.children.length - 1)]?.focus(); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); btn.focus(); }
+  };
+  wrap.addEventListener("focusout", e => { if (!wrap.contains(e.relatedTarget)) close(); });
+  const had = document.activeElement === sel;
+  sel.classList.add("hide"); sel.after(wrap); show();
+  if (had) btn.focus();
+}
+const menued = new WeakSet();
+function menusIn(root) {
+  for (const s of root.matches?.("select") ? [root] : root.querySelectorAll("select")) if (!menued.has(s)) { menued.add(s); menuFor(s); }
+}
+new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) menusIn(n); })
+  .observe(document.body, { childList: true, subtree: true });
+addEventListener("scroll", e => { if (menuClose && !e.target.closest?.(".menulist")) menuClose(); }, true);
+addEventListener("resize", () => menuClose?.());
+menusIn(document.body);
+// ---- patches: 50 bytes
+function nameOf(b) { const n = b.slice(0, 12), z = n.indexOf(0); return String.fromCharCode(...(z < 0 ? n : n.slice(0, z))); }
+const cleanName = n => [...String(n).toUpperCase()].filter(c => c >= " " && c <= "~").join("").slice(0, 11).trim() || "PATCH";
+function withName(b, n) {
+  const c = b.slice(), s = cleanName(n);
+  for (let i = 0; i < 12; i++) c[i] = i < s.length ? s.charCodeAt(i) : 0;
+  return c;
+}
+const INIT = withName([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x08, 0xA9, 0x40, PF_HARD, 0x08, 0x00, 0, 0x10, 0xE0, 0x10, 0, 0x80, 0, 0x80,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "INIT");
+const WAVES = [[0x10, "TRI"], [0x20, "SAW"], [0x40, "PULSE"], [0x80, "NOISE"]];
+const waveText = w => WAVES.filter(([m]) => w & m).map(([, t]) => t).join("+") || "NONE";
+function toJson(b) {                            // a patch's fields, as docs/MIDI.md names them
+  const o = { name: nameOf(b) };
+  for (const [k, i] of Object.entries(F)) {
+    if (k === "wt_ctl" || k === "wt_note") o[k] = b.slice(i, i + 8).map(x => k === "wt_note" ? s8(x) : x);
+    else o[k] = SIGNED.has(k) ? s8(b[i]) : b[i];
+  }
+  return o;
+}
+function fromJson(o) {                          // null if it is not a patch
+  if (!o || typeof o.name !== "string") return null;
+  const b = withName(INIT, o.name);
+  for (const [k, i] of Object.entries(F)) {
+    if (k === "wt_ctl" || k === "wt_note") { if (Array.isArray(o[k])) for (let j = 0; j < 8; j++) b[i + j] = (o[k][j] | 0) & 255; }
+    else if (Number.isFinite(o[k])) b[i] = o[k] & 255;
+  }
+  return sane(b);
+}
+function sane(b) {                              // as the FM-1's patch_sane, so what the page holds is what the FM-1 keeps
+  const c = b.slice();
+  c[11] = 0; c[F.wave] &= 0xFE; c[F.flags] &= PF_FILTER | PF_HARD; c[F.pw_hi] &= 15; c[F.mode] &= 0x70; c[F.res] &= 15;
+  if (c[F.wt_len] > WT_MAX) c[F.wt_len] = WT_MAX;
+  return c;
+}
+const same = (a, b) => !!a && !!b && a.every((x, i) => x === b[i]);
+
+// ---- MIDI: the FM-1 found by name
+function setConn(ok, text) { $("pill").className = "conn " + (ok ? "ok" : "err"); $("pilltext").textContent = text.toUpperCase(); }
+async function startMidi() {
+  if (!navigator.requestMIDIAccess) { setConn(false, "Needs Chrome or Edge"); return; }
+  try {
+    const access = await navigator.requestMIDIAccess({ sysex: false });
+    const fill = () => {
+      const sel = $("out"), prev = sel.value, outs = [...access.outputs.values()];
+      sel.innerHTML = "";
+      if (!outs.length) sel.add(new Option("none", ""));
+      for (const o of outs) sel.add(new Option(o.name, o.id));
+      const fm1 = outs.find(o => o.id === prev) || outs.find(o => /fm-?1|felucca/i.test(o.name)) || outs[0];
+      if (fm1) sel.value = fm1.id;
+      const was = state.out;
+      state.out = fm1 || null;
+      const ins = [...access.inputs.values()];
+      const inp = fm1 && (ins.find(i => i.name === fm1.name) || ins.find(i => /fm-?1|felucca/i.test(i.name)));
+      for (const i of ins) i.onmidimessage = i === inp ? e => link.reply(e.data) : null;
+      if (!fm1) setConn(false, "FM-1 not found");
+      else setConn(true, /fm-?1|felucca/i.test(fm1.name) ? "FM-1 connected" : "Sending to " + fm1.name);
+      if (fm1 !== was) state.fw = null;
+      if (fm1 && fm1 !== was) setTimeout(() => readAll().catch(() => {}), 300);
+    };
+    $("out").onchange = () => { state.out = access.outputs.get($("out").value) || null; fill(); };
+    access.onstatechange = fill;
+    fill();
+  } catch (e) {
+    setConn(false, "MIDI not allowed");
+    setStatus("The browser refused MIDI. Open the page from https or localhost and allow MIDI when asked.", "err");
+  }
+}
+$("pill").onclick = () => showTab("help");
+
+// ---- the FM-1's answers (docs/MIDI.md 2), and waiting for them
+const link = {
+  waiters: [], dump: null, ver: null,
+  reply(d) {
+    if (d[0] !== 0xBF) return;
+    const c = d[1], v = d[2], r = this.dump;
+    if (c === 0x1B) this.ver = { id: v };
+    else if (c === 0x1C) this.ver = { ...(this.ver || {}), v: [v] };
+    else if (c === 0x1D && this.ver?.v?.length === 1) this.ver.v.push(v);
+    else if (c === 0x1E && this.ver?.v?.length === 2) { this.resolve("version", { id: this.ver.id, v: [...this.ver.v, v] }); this.ver = null; }
+    else if (c === 0x3E || c === 0x3F) this.resolve("slotw", { s: v, ok: c === 0x3E });
+    else if (c === 0x56 || c === 0x57) this.resolve("play", { s: v, ok: c === 0x56 });
+    else if (c === 0x3D) this.resolve("cleared", v);
+    else if (c === 0x6E) this.resolve("heard", v);
+    else if (c === 0x4D) this.resolve("saved", v);
+    else if (c === 0x6A || c === 0x6B) this.resolve("kit", { k: v, ok: c === 0x6A });
+    else if (c === 0x6C) this.resolve("kitclear", v);
+    else if (c === 0x30 || c === 0x37) this.dump = { cur: c === 0x37, s: v, b: [], lo: -1, sum: 0 };
+    else if (c === 0x32 && r) r.lo = v;
+    else if (c === 0x33 && r && r.lo >= 0) { r.b.push(r.lo | v << 7); r.lo = -1; }
+    else if (c === 0x34 && r) r.sum = v;
+    else if (c === 0x35 && r) {
+      this.dump = null;
+      const ok = r.b.length === SIZE && (r.sum | v << 7) === (r.b.reduce((a, x) => a + x, 0) & 0x3FFF);
+      if (ok && !r.cur) this.resolve("slot", { s: r.s, b: r.b });
+      if (ok && r.cur) this.curDump = r;
+    } else if (c === 0x36) this.resolve("slot", { s: v, b: null });
+    else if (c === 0x38) { const r2 = this.curDump; this.curDump = null; if (r2) this.resolve("cur", { s: r2.s, b: r2.b, edited: v === 1 }); }
+    else if (c === 0x3C) notice(v);
+    else if (c === 0x20) this.part = { p: v };
+    else if ((c === 0x21 || c === 0x25 || c === 0x26 || c === 0x2E) && this.part) this.part[c] = v;
+    else if (c >= 0x28 && c <= 0x2D) partMoved(c - 0x28, v);
+    else if (c === 0x2F) {
+      if (this.part?.p === v) { this.resolve("partread", this.part); this.part = null; }
+      this.resolve("partok", v);
+    }
+  },
+  resolve(kind, v) { this.waiters = this.waiters.filter(w => (w.kind === kind && w.ok(v)) ? (w.done(v), false) : true); },
+  wait(kind, ok, ms) {
+    return new Promise((done, fail) => {
+      const w = { kind, ok, done: v => { clearTimeout(t); done(v); } };
+      const t = setTimeout(() => { this.waiters = this.waiters.filter(x => x !== w); fail(new Error("no answer from the FM-1")); }, ms);
+      this.waiters.push(w);
+    });
+  },
+};
+async function control(c, v, kind, ok, tries = 4) {   // a CC, again until the FM-1 answers it
+  for (let t = 0; t < tries; t++) {
+    const r = link.wait(kind, ok, 500);
+    cc16(c, v);
+    try { return await r; } catch (e) { /* lost: again */ }
+  }
+  throw new Error("no answer from the FM-1");
+}
+function frameMsg(begin, target, b) {           // a patch frame (docs/MIDI.md 2.2)
+  const m = [0xBF, begin, target];
+  for (const x of b) m.push(0xBF, 0x52, x & 127, 0xBF, 0x53, x >> 7 & 1);
+  const sum = b.reduce((a, x) => a + x, 0) & 0x3FFF;
+  m.push(0xBF, 0x54, sum & 127, 0xBF, 0x55, sum >> 7);
+  return m;
+}
+function kitFrame(begin, k, at, writes = []) {   // a sample frame (docs/MIDI.md 2.6): writes are [value, cycles]
+  const vals = [at & 127, at >> 7 & 127], m = [0xBF, begin, k, 0xBF, 0x61, vals[0], 0xBF, 0x62, vals[1]];
+  for (const [v, g] of writes) {
+    const e = v << 10 | g;
+    m.push(0xBF, 0x63, e & 127, 0xBF, 0x64, e >> 7);
+    vals.push(e & 127, e >> 7);
+  }
+  const sum = vals.reduce((a, x) => a + x, 0) & 0x3FFF;
+  return m.concat(0xBF, 0x65, sum & 127, 0xBF, 0x66, sum >> 7);
+}
+async function kitUpload(samples) {             // the FM-1's kit replaced: sample k is channel 10's note 36 + k
+  const sig = JSON.stringify(samples.map(x => x.writes));
+  if (state.kitSig === sig) return;
+  let total = 0, done = 0;
+  for (const x of samples) total += Math.ceil(x.writes.length / 128);
+  for (let t = 0; t < 3; t++) {                 // (a length frame lost after it was taken is refused again: from the clear)
+    try {
+      await control(0x68, 0, "kitclear", () => true);
+      for (let k = 0; k < samples.length; k++) {
+        const r = link.wait("kit", x => x.k === k, 500);
+        send(kitFrame(0x67, k, samples[k].writes.length));
+        if (!(await r).ok) throw new Error("the FM-1 refused sample " + (k + 1));
+      }
+      for (let k = 0; k < samples.length; k++)
+        for (let i = 0; i < samples[k].writes.length; i += 128) {
+          const m = kitFrame(0x60, k, i, samples[k].writes.slice(i, i + 128));
+          for (let u = 0; ; u++) {
+            const r = link.wait("kit", x => x.k === k, 500);
+            send(m);
+            if ((await r.catch(() => null))?.ok) break;
+            if (u === 10) throw new Error("the FM-1 did not take sample " + (k + 1));
+          }
+          setProgress(++done / total);
+        }
+      state.kitSig = sig;
+      return;
+    } catch (e) { if (t === 2) throw e; done = 0; }
+  }
+}
+
+// ---- the library on the FM-1
+async function readSlot(s) {
+  for (let t = 0; t < 4; t++) {
+    const r = link.wait("slot", x => x.s === s, 500);
+    cc16(0x5C, s);
+    try { state.lib[s] = (await r).b; return; } catch (e) { /* lost: again */ }
+  }
+  throw new Error("the FM-1 did not send slot " + slotName(s));
+}
+async function writeSlot(s, b) {
+  const p = sane(b), m = frameMsg(0x5B, s, p);
+  for (let t = 0; t < 30; t++) {
+    const r = link.wait("slotw", x => x.s === s, 400);
+    send(m);
+    try { if ((await r).ok) { state.lib[s] = p; return; } } catch (e) { /* lost: again */ }
+  }
+  throw new Error("the FM-1 did not take the patch for " + slotName(s));
+}
+async function emptySlot(s) { await control(0x5E, s, "cleared", v => v === s); state.lib[s] = null; }
+async function keep() {                         // RAM to flash
+  const saved = link.wait("saved", () => true, 20000);
+  await control(0x4E, 0, "heard", v => v === 0x4E);
+  const r = await saved;
+  if (r) throw new Error(r === 4 ? "the flash did not erase" : "the flash did not write");
+}
+async function readCurrent() {                  // the patch playing: { s, b, edited }
+  for (let t = 0; t < 4; t++) {
+    const r = link.wait("cur", () => true, 600);
+    cc16(0x5D, 0);
+    try { return await r; } catch (e) { /* lost: again */ }
+  }
+  throw new Error("the FM-1 did not send its patch");
+}
+let busy = false;
+async function job(what, fn) {                  // one transfer at a time, its outcome in the status line
+  if (!state.out) { setStatus("The FM-1 is not connected.", "err"); return; }
+  if (busy) { setStatus("Wait for the last transfer to finish.", "err"); return; }
+  if (!needSid()) return;
+  busy = true;
+  try { await fn(); } catch (e) { setStatus(what + " stopped: " + e.message, "err"); }
+  busy = false;
+  setTimeout(() => setProgress(null), 1200);
+}
+async function readLib() {
+  setStatus("Reading the FM-1's library...");
+  for (let s = 0; s < NSLOT; s++) { await readSlot(s); if (s % 4 === 3) { setProgress((s + 1) / NSLOT); renderLib(); } }
+  renderLib(); renderSlotMenu();
+  const n = state.lib.filter(Boolean).length;
+  setStatus(`The FM-1 holds ${n} patch${n === 1 ? "" : "es"}.`, "ok");
+}
+async function readVersion() {                  // 1B 2 is SID-1; OPN-1 2 sends 1C to 1E without it, others nothing
+  for (let t = 0; t < 3; t++) {
+    link.ver = null;
+    const r = link.wait("version", () => true, 400);
+    cc16(0x1F, 0);
+    const v = await r.catch(() => null);
+    if (v) {
+      state.fw = v.id !== 2 ? false : v.v[0] === 127 ? "DEV" : v.v.join(".");
+      setConn(!!state.fw, state.fw ? "FM-1 · SID-1 " + state.fw : "FM-1 · not SID-1");
+      return v;
+    }
+  }
+  state.fw = false;
+  setConn(false, "FM-1 · not SID-1");
+  return null;
+}
+async function readAll() {
+  busy = true;                                  // (no transfer starts before the version is known)
+  await readVersion().catch(() => null);
+  busy = false;
+  if (state.fw === false) { notSid(); return; }
+  await job("Reading", async () => {
+    await readLib();
+    await readParts();
+    await follow();
+  });
+}
+function needSid() {
+  if (state.fw !== false) return true;
+  setStatus("This page needs SID-1 on the FM-1.", "err");
+  notSid();
+  return false;
+}
+function notSid() {
+  $("donetitle").textContent = "Needs SID-1";
+  $("donetext").className = "";
+  $("donetext").textContent = "This FM-1 did not answer as SID-1: it runs other firmware (the stock one, or another custom firmware). Install SID-1 to use this page.";
+  $("donecancel").classList.add("hide");
+  $("doneprog").classList.add("hide");
+  $("doneok").disabled = false;
+  if (!$("done").open) $("done").showModal();
+}
+
+// ---- the FM-1 changed its patch (PRESETS, a knob, a program change): the Editor follows
+let noticeDue = false;
+function notice(s) {
+  if (song.timer) return;                       // (a song's program changes; reading back would hold up its notes)
+  if (s === state.ed.slot && performance.now() < state.quiet) return;
+  if (noticeDue) return;
+  noticeDue = true;
+  (async () => {
+    while (busy || edPending()) await new Promise(r => setTimeout(r, 100));
+    noticeDue = false;
+    if (state.fw) await job("Following", follow);
+  })();
+}
+async function follow() {                       // the Editor on the patch playing, as the FM-1 has it
+  const c = await readCurrent();
+  if (!c.edited) state.lib[c.s] = c.b.slice();
+  state.ed = { slot: c.s, b: c.b, base: (c.edited && state.lib[c.s] || c.b).slice() };
+  renderEditor(); renderLib(); renderSlotMenu();
+}
+
+// ---- the library tab
+function renderLib() {
+  const banks = $("banks");
+  banks.innerHTML = "";
+  for (let b = 0; b < 4; b++) {
+    const s = state.lib.slice(b * 32, b * 32 + 32), known = s.every(x => x !== undefined);
+    banks.append(el("button", { role: "tab", class: b === state.bank ? "on" : "", "aria-selected": b === state.bank,
+      onclick: () => { state.bank = b; renderLib(); } }, `B${b + 1}`, el("span", {}, known ? `${s.filter(Boolean).length}/32` : "?/32")));
+  }
+  const grid = $("slots"), incoming = new Set(imp.list.length ? targetSlots() : []);
+  grid.innerHTML = "";
+  for (let i = 0; i < BANK_SLOTS; i++) {
+    const s = state.bank * 32 + i, p = state.lib[s];
+    const label = p ? nameOf(p) : p === null ? "Empty" : "?";
+    grid.append(el("button", { class: "slot" + (p ? "" : " empty") + (s === state.sel ? " sel" : "") + (incoming.has(s) ? " incoming" : "") +
+        (state.clip?.from === s ? " clip" : "") + (state.fw && s === state.ed.slot ? " now" : ""),
+      onclick: () => { state.sel = s; $("tbank").value = s >> 5; $("tslot").value = s & 31; renderImport(); }, ondblclick: () => editSlot(s) },
+      el("span", { class: "n" }, el("span", {}, String(i + 1).padStart(2, "0")),
+        el("span", {}, p ? waveText(p[F.wave]) + (p[F.flags] & PF_FILTER ? " F" : "") : "")),
+      el("span", { class: "t" }, incoming.has(s) ? "NEW: " + imp.list.filter(x => x.on)[[...incoming].indexOf(s)].name : label)));
+  }
+  const p = state.lib[state.sel], has = state.sel >= 0;
+  $("slotinfo").textContent = !has ? `Program change ${state.bank * 32} to ${state.bank * 32 + 31} picks these.` :
+    `${slotName(state.sel)} ${p ? nameOf(p) : "(empty)"}: program change ${state.sel}` +
+    (state.clip ? `. ${state.clip.move ? "Moving" : "Copied"}: ${nameOf(state.clip.b)}` : "");
+  if (document.activeElement !== $("libname")) $("libname").value = p ? nameOf(p) : "";
+  for (const id of ["rename", "copyslot", "cutslot", "clearslot"]) $(id).disabled = !p;
+  $("editslot").disabled = !has;
+  $("pasteslot").disabled = !has || !state.clip || state.clip.from === state.sel;
+}
+$("readlib").onclick = () => shownJob("Reading", readLib);
+$("rename").onclick = () => {
+  const s = state.sel, name = cleanName($("libname").value);
+  shownJob("Renaming", async () => {
+    await writeSlot(s, withName(state.lib[s], name));
+    await keep();
+    if (s === state.ed.slot && state.ed.b) { state.ed.b = withName(state.ed.b, name); state.ed.base = withName(state.ed.base, name); renderEditor(); }
+    renderLib(); renderSlotMenu();
+    setStatus(`${slotName(s)} is ${name}.`, "ok");
+  });
+};
+$("copyslot").onclick = () => { state.clip = { b: state.lib[state.sel].slice(), from: state.sel, move: false }; renderLib(); };
+$("cutslot").onclick = () => { state.clip = { b: state.lib[state.sel].slice(), from: state.sel, move: true }; renderLib(); };
+$("pasteslot").onclick = async () => {
+  const s = state.sel, c = state.clip, there = state.lib[s];
+  if (there && !await ask("Replace", `Replace ${slotName(s)} ${nameOf(there)} with ${nameOf(c.b)}?`, "Replace it")) return;
+  shownJob(c.move ? "Moving" : "Copying", async () => {
+    await writeSlot(s, c.b);
+    if (c.move) await emptySlot(c.from);
+    await keep();
+    state.clip = null;
+    renderLib(); renderSlotMenu();
+    setStatus(`${nameOf(c.b)} is in ${slotName(s)}.`, "ok");
+  });
+};
+$("clearslot").onclick = async () => {
+  const s = state.sel;
+  if (!await ask("Empty slot", `Empty ${slotName(s)} ${nameOf(state.lib[s])} on the FM-1? Its patch is deleted.`, "Empty it")) return;
+  shownJob("Emptying", async () => {
+    await emptySlot(s);
+    await keep();
+    renderLib(); renderSlotMenu();
+    setStatus(slotName(s) + " emptied.", "ok");
+  });
+};
+$("editslot").onclick = () => editSlot(state.sel);
+$("emptybank").onclick = async () => {
+  const b = state.bank, s = state.lib.slice(b * 32, b * 32 + 32);
+  if (s.some(x => x === undefined)) { setStatus("Read the FM-1 first.", "err"); return; }
+  const used = s.map((x, i) => x ? b * 32 + i : -1).filter(x => x >= 0);
+  if (!used.length) { setStatus(`Bank ${b + 1} is empty already.`, "ok"); return; }
+  if (!await ask("Empty bank", `Empty all of bank ${b + 1} on the FM-1? Its ${used.length} patch${used.length === 1 ? " is" : "es are"} deleted.`, "Empty it")) return;
+  shownJob("Emptying", async () => {
+    for (let i = 0; i < used.length; i++) { await emptySlot(used[i]); setProgress((i + 1) / used.length); }
+    await keep();
+    renderLib(); renderSlotMenu();
+    setStatus(`Bank ${b + 1} emptied.`, "ok");
+  });
+};
+function download(name, text) {
+  const a = el("a", { href: URL.createObjectURL(new Blob([text], { type: "application/json" })), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$("exportbank").onclick = () => {
+  const b = state.bank, s = state.lib.slice(b * 32, b * 32 + 32);
+  if (s.some(x => x === undefined)) { setStatus("Read the FM-1 first.", "err"); return; }
+  download(`sid1-bank${b + 1}.json`, JSON.stringify({ format: "sid1-bank", version: 1, patches: s.map(p => p ? toJson(p) : null) }, null, 1));
+};
+$("importfile").onchange = async e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  let o;
+  try { o = JSON.parse(await f.text()); } catch (x) { setStatus(f.name + " is not JSON.", "err"); return; }
+  if (Array.isArray(o?.patches)) {
+    const list = o.patches.slice(0, 32).map(p => p === null ? null : fromJson(p)), b = state.bank;
+    if (list.some((p, i) => p === null && o.patches[i] !== null)) { setStatus(f.name + " has entries that are not patches.", "err"); return; }
+    const n = list.filter(Boolean).length;
+    if (!await ask("Import bank", `Put ${f.name}'s ${n} patch${n === 1 ? "" : "es"} in bank ${b + 1}? Its 32 slots are replaced.`, "Import")) return;
+    shownJob("Importing", async () => {
+      for (let i = 0; i < 32; i++) {
+        const s = b * 32 + i;
+        if (list[i]) await writeSlot(s, list[i]); else if (state.lib[s] !== null) await emptySlot(s);
+        setProgress((i + 1) / 32);
+      }
+      await keep();
+      renderLib(); renderSlotMenu();
+      setStatus(`Bank ${b + 1} imported from ${f.name}.`, "ok");
+    });
+  } else {
+    const p = fromJson(o), s = state.sel;
+    if (!p) { setStatus(f.name + " is not a SID-1 bank or patch.", "err"); return; }
+    if (s < 0) { setStatus("Pick a slot for the patch first.", "err"); return; }
+    if (state.lib[s] && !await ask("Import patch", `Replace ${slotName(s)} ${nameOf(state.lib[s])} with ${nameOf(p)}?`, "Replace it")) return;
+    shownJob("Importing", async () => {
+      await writeSlot(s, p);
+      await keep();
+      renderLib(); renderSlotMenu();
+      setStatus(`${nameOf(p)} is in ${slotName(s)}.`, "ok");
+    });
+  }
+};
+
+// ---- .sid tunes: their instruments as patches (the c64 and sidpatch sections below)
+const imp = { tune: null, file: "", song: 1, list: [], error: null, run: null, res: null, smp: null };   // list: { fields, notes, voices, name, on }
+for (let i = 0; i < 32; i++) $("tslot").add(new Option(String(i + 1).padStart(2, "0"), i));
+async function loadSid(f) {
+  let t;
+  try { t = psid(new Uint8Array(await f.arrayBuffer())); } catch (e) { setStatus(`${f.name}: ${e.message}.`, "err"); return; }
+  imp.tune = t; imp.file = f.name; imp.song = t.start;
+  $("impsong").replaceChildren(...Array.from({ length: t.songs }, (_, k) => new Option(`${k + 1} of ${t.songs}`, k + 1)));
+  $("impsong").value = t.start;
+  const free = state.lib.findIndex(x => x === null);   // (to the first empty slot, rather than over a patch)
+  if (free >= 0) { $("tbank").value = free >> 5; $("tslot").value = free & 31; state.bank = free >> 5; }
+  analyse();
+}
+function analyse() {                            // (a busy RSID takes seconds and holds the page: the popup is drawn first)
+  const t = imp.tune, d = $("done");
+  setStatus(`Reading song ${imp.song}...`);
+  $("donetitle").textContent = "Reading the tune...";
+  $("donetext").textContent = `${t.name || imp.file}, song ${imp.song}: playing ${$("implen").selectedOptions[0].text} of it on the page's C64 to find its instruments and drums. A busy tune takes a few seconds.`;
+  $("donetext").className = "";
+  $("doneprog").classList.add("hide");
+  $("doneok").disabled = true;
+  if (!d.open) d.showModal();
+  setTimeout(() => {                            // (time for a frame or two first)
+    try { analyseNow(); } finally { $("doneok").disabled = false; d.close(); }
+  }, 50);
+}
+function analyseNow() {
+  songStop();
+  const t = imp.tune, run = sidRun(t, imp.song, +$("implen").value), r = sidInstruments(t, run), short = tuneShort(t.name || imp.file);
+  imp.error = run.error; imp.run = run; imp.res = r; imp.smp = sidSamples(t, run);
+  imp.list = r.instruments.slice(0, 64).map((x, k) => ({ ...x, name: `${short} ${k + 1}`.slice(0, 11), on: k < 32 }));
+  renderImport(); renderLib();
+  const secs = Math.round(run.frames.length / run.rate);
+  setStatus(run.error ? `Song ${imp.song} stopped after ${secs} s (${run.error}): the patches are from what played.` :
+    `Song ${imp.song}: ${r.notes.length} notes in ${secs} s, ${r.instruments.length} instruments.`, run.error ? "err" : "ok");
+}
+function describe(x) {
+  const f = x.fields, w = [];
+  if (f.wt_len) w.push(f.wt_abs ? "drum steps" : `${f.wt_len} steps`);
+  if (f.flags & 1) w.push("filter");
+  if (f.pw_speed && (f.wave & 0x40 || f.wt_ctl.some(c => c & 0x40))) w.push("pulse sweep");
+  if (f.vib_depth) w.push("vibrato");
+  if (f.flags & 2) w.push("hard restart");
+  return `${waveText(f.wave)}${w.length ? ", " + w.join(", ") : ""} · ${x.notes.length} note${x.notes.length === 1 ? "" : "s"}, voice ${x.voices.map(v => v + 1).join(" ")}`;
+}
+const impBytes = x => fromJson({ ...x.fields, name: x.name });
+function targetSlots() {                        // the slots the ticked patches would fill, from the one picked
+  const from = +$("tbank").value * 32 + +$("tslot").value, n = imp.list.filter(x => x.on).length;
+  return Array.from({ length: Math.min(n, NSLOT - from) }, (_, k) => from + k);
+}
+function renderImport() {
+  $("impbox").classList.toggle("hide", !imp.tune);
+  if (!imp.tune) { renderLib(); return; }
+  const t = imp.tune;
+  $("imptune").textContent = [t.name, t.author, t.released].filter(Boolean).join(" · ") || imp.file;
+  const list = $("implist");
+  list.replaceChildren(...imp.list.map(x => el("div", { class: "item" + (x.on ? "" : " off") },
+    el("input", { type: "checkbox", checked: x.on, "aria-label": "Import " + x.name, onchange: e => { x.on = e.target.checked; renderImport(); } }),
+    el("input", { type: "text", value: x.name, maxLength: 11, "aria-label": "Name", oninput: e => { x.name = cleanName(e.target.value); renderLib(); } }),
+    el("span", { class: "meta" }, describe(x)),
+    el("button", { class: "btn small", onclick: () => preview(x) }, "Play"))));
+  const on = imp.list.filter(x => x.on).length, slots = targetSlots(), full = slots.filter(s => state.lib[s]).length;
+  $("impsum").textContent = `${on} of ${imp.list.length} ticked`;
+  $("tnote").textContent = !on ? "Tick the patches to send." : slots.length < on ? `Only ${slots.length} fit from here.` :
+    `${slotName(slots[0])} to ${slotName(slots[slots.length - 1])}` + (full ? `, replacing ${full}` : "");
+  $("sendimp").disabled = !on;
+  renderSong();
+  renderLib();
+}
+async function preview(x) {                     // as the patch playing (again until taken), then a note at its usual pitch
+  if (!state.out) { setStatus("The FM-1 is not connected.", "err"); return; }
+  if (!needSid()) return;
+  const key = x.fields.wt_abs ? 60 : clamp(median(x.notes.map(n => n.base)), 24, 96), s = state.ed.slot, m = frameMsg(0x50, s, impBytes(x));
+  for (let t = 0; t < 30; t++) {
+    const r = link.wait("play", y => y.s === s, 300);
+    send(m);
+    if ((await r.catch(() => null))?.ok) {
+      send([0x9F, key, 110]);
+      setTimeout(() => send([0x8F, key, 0]), 700);
+      setStatus(`${x.name} (a preview: send it to a slot to keep it).`);
+      return;
+    }
+  }
+  setStatus("The FM-1 did not take the preview: check the cable.", "err");
+}
+$("sidfile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) loadSid(f); };
+const drop = $("drop");
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) loadSid(f); };
+$("impsong").onchange = () => { imp.song = +$("impsong").value; analyse(); };
+$("implen").onchange = () => analyse();
+$("impall").onclick = () => { for (const x of imp.list) x.on = true; renderImport(); };
+$("impnone").onclick = () => { for (const x of imp.list) x.on = false; renderImport(); };
+$("impclear").onclick = () => { songStop(); imp.tune = null; imp.list = []; imp.run = imp.res = imp.smp = null; renderImport(); };
+$("tbank").onchange = $("tslot").onchange = () => { state.bank = +$("tbank").value; renderImport(); };
+const kitOn = () => !!(imp.smp?.samples.length && $("impdrums").checked);
+async function sendImports(why) {               // the ticked patches to their slots (asking before replacing), and the drums: true if sent
+  const list = imp.list.filter(x => x.on), slots = targetSlots(), full = slots.filter(s => state.lib[s] && !isSent(s, list[slots.indexOf(s)]));
+  if (slots.length < list.length) { setStatus(`Only ${slots.length} of the ${list.length} patches fit from ${slotName(slots[0] ?? 127)}.`, "err"); return false; }
+  if ((full.length || why) && !await ask(full.length ? "Replace" : "Send", (why ? why + " " : "") + (full.length ? `${full.length} of the slots hold patches (${full.slice(0, 4).map(s => nameOf(state.lib[s])).join(", ")}${full.length > 4 ? "..." : ""}). Replace them?` : ""),
+    full.length ? "Replace them" : "Send them")) return false;
+  await shownJob("Sending", async () => {
+    for (let k = 0; k < list.length; k++) { await writeSlot(slots[k], impBytes(list[k])); setProgress((k + 1) / list.length); }
+    if (kitOn()) await kitUpload(imp.smp.samples);
+    await keep();
+    renderLib(); renderSlotMenu();
+    setStatus(`${list.length} patch${list.length === 1 ? "" : "es"} in ${slotName(slots[0])} to ${slotName(slots[list.length - 1])}.`, "ok");
+  });
+  return $("status").className !== "err";
+}
+const isSent = (s, x) => !!(x && state.lib[s] && state.lib[s].join() === sane(impBytes(x)).join());
+$("sendimp").onclick = () => sendImports();
+
+// ---- the song: the tune as MIDI (sidMidi), played live on the FM-1 in voices mode, or saved as .mid
+const song = { timer: 0, ev: [], i: 0, t0: 0, last: 0, mode: 0, secs: 0 };
+function songSlots() {                          // instrument k -> the slot its patch goes to (-1: not ticked)
+  const on = imp.list.map((x, k) => x.on ? k : -1).filter(k => k >= 0), slots = targetSlots();
+  return k => { const i = on.indexOf(k); return i >= 0 && i < slots.length ? slots[i] : -1; };
+}
+const songEvents = () => sidMidi(imp.tune, imp.run, imp.res, songSlots(), kitOn() ? imp.smp.hits : []);
+const mmss = s => { s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+function renderSong() {
+  $("songplay").textContent = song.timer ? "Stop" : "Play song";
+  $("songplay").classList.toggle("on", !!song.timer);
+  if (!song.timer && imp.res) $("songnote").textContent = `${mmss(imp.run.frames.length / imp.run.rate)}: voice n plays on MIDI channel n, the ticked patches from their slots.`;
+  const smp = imp.smp?.samples || [];
+  $("impkit").classList.toggle("hide", !smp.length);
+  $("kitnote").textContent = `Drums: ${smp.length} sample${smp.length === 1 ? "" : "s"} played through the volume register, sent to the FM-1's kit (it replaces the one there) and played on MIDI channel 10, notes 36 to ${35 + smp.length}. They are heard on the 6581 only.`;
+  $("kitlist").replaceChildren(...smp.map((x, k) => el("button", { class: "btn small", title: `${x.writes.length} writes, heard ${x.hits} times`,
+    onclick: () => kitPreview(k) }, `${36 + k}: ${(x.writes.reduce((a, w) => a + w[1], 0) / 985.248).toFixed(0)} ms`)));
+}
+function kitPreview(k) {
+  if (!state.out) { setStatus("The FM-1 is not connected.", "err"); return; }
+  if (!needSid()) return;
+  job("Sending the drums", async () => {
+    await kitUpload(imp.smp.samples);
+    send([0x99, 36 + k, 100, 0x89, 36 + k, 0]);
+    setStatus(`Sample ${k + 1} (note ${36 + k} on channel 10). Send to FM-1 keeps the kit after power off.`, "ok");
+  });
+}
+$("impdrums").onchange = () => renderSong();
+async function songPlay() {
+  if (song.timer) { songStop(); return; }
+  if (!state.out) { setStatus("The FM-1 is not connected.", "err"); return; }
+  if (!needSid() || !imp.res) return;
+  const list = imp.list.filter(x => x.on), slots = targetSlots();
+  if (!list.length) { setStatus("Tick the patches the song plays.", "err"); return; }
+  if (!list.every((x, k) => isSent(slots[k], x))) {
+    if (!await sendImports("The song plays the ticked patches from their slots, so they go to the FM-1 first.")) return;
+    if ($("done").open) $("done").close();
+  }
+  await job("Starting", async () => {
+    if (kitOn()) await kitUpload(imp.smp.samples);
+    if (!state.partsKnown) await readParts();
+    song.mode = state.mode;
+    if (state.mode !== 1) await setMode(1);
+  });
+  if ($("status").className === "err") return;
+  song.ev = songEvents(); song.i = 0; song.secs = imp.run.frames.length / imp.run.rate;
+  song.t0 = song.last = performance.now() + 200;
+  song.timer = setInterval(songPump, 50);
+  songPump(); renderSong(); renderSetup();
+  setStatus(`Playing song ${imp.song} on the FM-1 in voices mode.`, "ok");
+}
+function songPump() {                           // what falls due in the next 300 ms, timestamped, so the timer's jitter is not heard
+  const now = performance.now();
+  while (song.i < song.ev.length && song.t0 + song.ev[song.i].t * 1000 < now + 300) {
+    const e = song.ev[song.i++], at = song.t0 + e.t * 1000;
+    state.out?.send(e.m, at);
+    song.last = Math.max(song.last, at);
+  }
+  $("songnote").textContent = `Playing ${mmss(Math.max(0, now - song.t0) / 1000)} of ${mmss(song.secs)}`;
+  if (song.i >= song.ev.length && now > song.last + 100) { songStop(); setStatus(`Song ${imp.song} played.`, "ok"); }
+}
+function songStop() {
+  if (!song.timer) return;
+  clearInterval(song.timer);
+  song.timer = 0;
+  const at = Math.max(performance.now(), song.last) + 5;   // (after what the browser has queued already)
+  for (let ch = 0; ch < 6; ch++) state.out?.send([0xB0 | ch, 123, 0, 0xE0 | ch, 0, 64], at);
+  if (song.mode !== 1) setTimeout(() => job("Stopping", async () => { await setMode(song.mode); renderSetup(); }), at - performance.now() + 50);
+  renderSong();
+}
+$("songplay").onclick = songPlay;
+$("songmid").onclick = () => {
+  if (!imp.res) return;
+  const slots = targetSlots(), name = tuneShort(imp.tune.name || imp.file);
+  const a = el("a", { href: URL.createObjectURL(new Blob([midiFile(songEvents(), imp.tune.name || imp.file)], { type: "audio/midi" })), download: `${name}-${imp.song}.mid` });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  setStatus(`Saved. It plays the FM-1 in voices mode (Setup), with the patches in ${slots.length ? slotName(slots[0]) + " to " + slotName(slots[slots.length - 1]) : "their slots"}: send them there first.`, "ok");
+};
+
+// ---- the Editor: the patch playing on the FM-1; Save puts it in its slot
+function editSlot(s) {
+  job("Opening", async () => {
+    if (state.lib[s] === undefined) await readSlot(s);
+    const p = state.lib[s];
+    state.quiet = performance.now() + 800;
+    if (p) send([0xCF, s]);                      // (loads it on the edited part, as PRESETS)
+    state.ed = { slot: s, b: (p || INIT).slice(), base: (p || INIT).slice() };
+    if (!p) await play();
+    renderEditor(); renderLib(); renderSlotMenu();
+    showTab("editor");
+  });
+}
+let edTimer = 0, edGen = 0, edBusy = false;
+const edPending = () => edBusy || edTimer !== 0;
+async function play() {                         // the Editor's patch as the one playing, again until taken
+  const gen = ++edGen, m = frameMsg(0x50, state.ed.slot, sane(state.ed.b));
+  for (let t = 0; t < 30 && gen === edGen; t++) {
+    const r = link.wait("play", x => x.s === state.ed.slot, 300);
+    send(m);
+    if ((await r.catch(() => null))?.ok) return;
+  }
+  if (gen === edGen) setStatus("The FM-1 did not take the edit: check the cable.", "err");
+}
+function edChanged(redraw = true) {              // sent a moment after the last change (a newer change takes over)
+  if (redraw) renderEditor(); else refresh();
+  clearTimeout(edTimer);
+  edTimer = setTimeout(async () => {
+    edTimer = 0;
+    if (!state.ed.b || !state.out || !state.fw) return;
+    edBusy = true;
+    try { await play(); } finally { edBusy = false; }
+  }, 50);
+}
+const edGet = k => SIGNED.has(k) ? s8(state.ed.b[F[k]]) : state.ed.b[F[k]];
+function edSet(k, v) { state.ed.b[F[k]] = v & 255; edChanged(false); }   // (from a slider: redrawing it would end the drag)
+function slider(label, value, min, max, onInput, show = v => v) {
+  const out = el("output", {}, show(value));
+  const r = el("input", { type: "range", min, max, value, "aria-label": label, oninput: () => { out.textContent = show(+r.value); onInput(+r.value); } });
+  return el("label", { class: "sl" }, el("span", {}, label, out), r);
+}
+const field = (label, k, min, max, show) => slider(label, edGet(k), min, max, v => edSet(k, v), show);
+const nib = (label, k, hi) => slider(label, hi ? state.ed.b[F[k]] >> 4 : state.ed.b[F[k]] & 15, 0, 15,
+  v => edSet(k, hi ? (state.ed.b[F[k]] & 15) | v << 4 : (state.ed.b[F[k]] & 0xF0) | v));
+function toggle(label, on, flip) { return el("button", { class: on ? "on" : "", onclick: flip, "aria-pressed": !!on }, label); }
+const bitToggle = (label, k, m) => toggle(label, state.ed.b[F[k]] & m, () => { state.ed.b[F[k]] ^= m; edChanged(); });
+let live = [];                                  // [the node, what makes it]: redrawn as a slider moves
+const lv = make => { const n = make(); live.push([n, make]); return n; };
+function refresh() {
+  const e = state.ed;
+  $("edwhere").textContent = (multiUsed() ? `PART ${state.edPart + 1} · ` : "") + slotName(e.slot) + (same(e.b, e.base) ? "" : " · EDITED");
+  $("edsave").disabled = $("edrevert").disabled = same(e.b, e.base);
+  live = live.map(([n, make]) => { const m = make(); n.replaceWith(m); return [m, make]; });
+}
+function card(title, ...kids) { return el("div", { class: "card" }, el("h3", {}, title), ...kids); }
+
+// graphs: what the FM-1's player does, frame by frame (sid1.c's frame())
+const ATTACK_MS = [2, 8, 16, 24, 38, 56, 68, 80, 100, 250, 500, 800, 1000, 3000, 5000, 8000];   // the 6581 data sheet
+const DECAY_MS = ATTACK_MS.map(x => x * 3);
+const GW = 300, GH = 110, FRAMES = 150;         // 3 s at 50 frames a second
+function svg(paths, labels = []) {
+  const ns = "http://www.w3.org/2000/svg", s = document.createElementNS(ns, "svg");
+  s.setAttribute("viewBox", `0 0 ${GW} ${GH}`); s.setAttribute("preserveAspectRatio", "none"); s.setAttribute("class", "graph");
+  for (const [d, c] of paths) {
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("d", d); p.setAttribute("fill", "none"); p.setAttribute("stroke", c); p.setAttribute("stroke-width", 2);
+    p.setAttribute("vector-effect", "non-scaling-stroke");
+    s.append(p);
+  }
+  for (const [x, y, t] of labels) {
+    const e = document.createElementNS(ns, "text");
+    e.setAttribute("x", x); e.setAttribute("y", y); e.setAttribute("fill", "#9a90ec"); e.setAttribute("font-size", 14); e.setAttribute("font-family", "VT323, monospace");
+    e.textContent = t; s.append(e);
+  }
+  return s;
+}
+const line = (pts, y0, y1, lo, hi) => "M" + pts.map((v, i) => `${(i * GW / (pts.length - 1)).toFixed(1)},${(y1 - (v - lo) / (hi - lo || 1) * (y1 - y0)).toFixed(1)}`).join("L");
+function envGraph(b) {
+  const a = ATTACK_MS[b[F.ad] >> 4], d = DECAY_MS[b[F.ad] & 15], sus = (b[F.sr] >> 4) / 15, r = DECAY_MS[b[F.sr] & 15];
+  const hold = 400, total = a + d + hold + r, X = t => t / total * GW, Y = v => GH - 8 - v * (GH - 20);
+  const ex = (t0, t1, v0, v1) => {               // the SID's decay and release fall steeply, then slowly
+    let s = "";
+    for (let i = 1; i <= 24; i++) { const f = i / 24; s += `L${X(t0 + f * (t1 - t0)).toFixed(1)},${Y(v1 + (v0 - v1) * Math.exp(-5 * f)).toFixed(1)}`; }
+    return s;
+  };
+  const d0 = `M0,${Y(0)}L${X(a)},${Y(1)}` + ex(a, a + d, 1, sus) + `L${X(a + d + hold)},${Y(sus)}` + ex(a + d + hold, total, sus, 0);
+  const ms = t => t >= 1000 ? (t / 1000).toFixed(1) + " s" : t + " ms";
+  return svg([[d0, "#a69cf0"]], [[4, 12, `A ${ms(a)}  D ${ms(d)}  R ${ms(r)}`]]);
+}
+function pwCurve(b) {
+  let pw = (b[F.pw_hi] & 15) << 8 | b[F.pw_lo], step = s8(b[F.pw_speed]);
+  const lo = b[F.pw_min] * 16, hi = b[F.pw_max] * 16, pts = [pw];
+  for (let f = 0; f < FRAMES; f++) {
+    if (step) {
+      let w = pw + step;
+      if (w >= hi || w > 4095) { w = hi < 4095 ? hi : 4095; step = -Math.abs(step); }
+      if (w <= lo || w < 0) { w = lo > 0 ? lo : 0; step = Math.abs(step); }
+      pw = w;
+    }
+    pts.push(pw);
+  }
+  return svg([[line(pts, 6, GH - 6, 0, 4095), "#d6e08f"]], [[4, 12, `${(pts[0] / 40.95).toFixed(0)}% at the start`]]);
+}
+function cutCurve(b) {
+  let cut = b[F.cut] << 3;
+  const end = b[F.cut_end] << 3, s = s8(b[F.cut_speed]), pts = [cut];
+  for (let f = 0; f < FRAMES; f++) {
+    if (s > 0 && cut < end) cut = Math.min(cut + s, end);
+    if (s < 0 && cut > end) cut = Math.max(cut + s, end);
+    pts.push(cut);
+  }
+  return svg([[line(pts, 6, GH - 6, 0, 2047), "#8fd0e0"]], [[4, 12, "cutoff over 3 s (shared by the chip's 3 voices)"]]);
+}
+function vibCurve(b) {
+  const delay = b[F.vib_delay], speed = b[F.vib_speed], depth = b[F.vib_depth], pts = [0];
+  let ph = 64;
+  for (let f = 1; f <= FRAMES; f++) {
+    if (depth && f >= delay) ph = (ph + speed) & 255;
+    const tri = ph < 128 ? ph - 64 : 191 - ph;
+    pts.push(depth && f >= delay ? Math.trunc(tri * depth / 64) : 0);
+  }
+  const m = Math.max(depth, 1);
+  return svg([[line(pts, 6, GH - 6, -m, m), "#f0949a"]], [[4, 12, depth ? `±${depth} cents, ${speed ? (50 * speed / 256).toFixed(2) + " Hz" : "still"}` : "no vibrato"]]);
+}
+function wtOrder(b) {                           // the steps the first frames play
+  const len = b[F.wt_len], loop = b[F.wt_loop], out = [];
+  if (!len) return "";
+  let pos = 0;
+  for (let f = 0; f < 16; f++) { out.push(pos + 1); if (++pos >= len) pos = loop < len ? loop : len - 1; }
+  return out.join(" ") + " ...";
+}
+const STEP_WAVES = [[0, "Patch's"], [0x10, "TRI"], [0x20, "SAW"], [0x40, "PULSE"], [0x80, "NOISE"], [0x30, "SAW+TRI"], [0x50, "PULSE+TRI"], [0x60, "PULSE+SAW"], [0x70, "P+S+T"]];
+function wtTable(b) {
+  const len = b[F.wt_len], abs = b[F.wt_abs], rows = [];
+  for (let k = 0; k < WT_MAX; k++) {
+    const ctl = b[F.wt_ctl + k], isAbs = abs >> k & 1, note = isAbs ? b[F.wt_note + k] : s8(b[F.wt_note + k]);
+    const w = el("select", { "aria-label": `Step ${k + 1} waveform`, onchange: () => { state.ed.b[F.wt_ctl + k] = +w.value; edChanged(); } },
+      STEP_WAVES.map(([v, t]) => el("option", { value: v, selected: (ctl & 0xF0) === v }, t)));
+    const n = el("input", { type: "number", min: isAbs ? 0 : -48, max: isAbs ? 107 : 48, value: note, "aria-label": `Step ${k + 1} note`,
+      onchange: () => { const v = Math.max(+n.min, Math.min(+n.max, Math.round(+n.value) || 0)); state.ed.b[F.wt_note + k] = v & 255; edChanged(); } });
+    const a = el("input", { type: "checkbox", checked: !!isAbs, "aria-label": `Step ${k + 1} absolute`,
+      onchange: () => {                          // keep the pitch about where it was: relative to C4 (60)
+        state.ed.b[F.wt_abs] ^= 1 << k;
+        state.ed.b[F.wt_note + k] = (a.checked ? Math.max(0, Math.min(107, 60 + note)) : Math.max(-48, Math.min(48, note - 60))) & 255;
+        edChanged();
+      } });
+    rows.push(el("tr", { class: k < len ? "" : "off" }, el("td", {}, String(k + 1)), el("td", {}, w), el("td", {}, n),
+      el("td", {}, isAbs ? noteName(note) : (note > 0 ? "+" : "") + note), el("td", {}, a)));
+  }
+  return el("table", { class: "wt" }, el("tr", {}, ["Step", "Waveform", "Note", "", "Abs"].map(t => el("th", {}, t))), rows);
+}
+function renderSlotMenu() {
+  const sel = $("edslot"), s = state.ed.slot;
+  sel.innerHTML = "";
+  for (let i = 0; i < NSLOT; i++) {
+    const p = state.lib[i];
+    if (p || i === s) sel.add(new Option(`${slotName(i)} ${p ? nameOf(p) : "(empty)"}`, i));
+  }
+  sel.value = s;
+}
+$("edslot").onchange = () => editSlot(+$("edslot").value);
+function renderEditor() {
+  const e = state.ed, b = e.b, cards = $("cards");
+  const focus = document.activeElement?.getAttribute("aria-label");
+  if (!b) { cards.replaceChildren(el("p", { class: "sub" }, "Connect the FM-1, or pick a slot in the Library.")); return; }
+  if (document.activeElement !== $("edname")) $("edname").value = nameOf(b);
+  live = [];
+  const wave = b[F.wave], mode = b[F.mode];
+  cards.replaceChildren(
+    card("Sound",
+      el("div", { class: "toggles" }, WAVES.map(([m, t]) => bitToggle(t, "wave", m))),
+      el("div", { class: "toggles" }, bitToggle("SYNC", "wave", 0x02), bitToggle("RING", "wave", 0x04), bitToggle("TEST", "wave", 0x08),
+        bitToggle("FILTER", "flags", PF_FILTER), bitToggle("HARD RESTART", "flags", PF_HARD)),
+      el("p", { class: "sub" }, wave & 0xF0 ? `Waveform ${waveText(wave)}. Sync and ring take the chip's previous voice.` : "No waveform: silent unless the wavetable gives one."),
+      el("div", { class: "sliders" }, field("TRANSPOSE", "transpose", -36, 36, v => (v > 0 ? "+" : "") + v), field("FINE", "fine", -50, 50, v => v + " ct"))),
+    card("Envelope", lv(() => envGraph(state.ed.b)),
+      el("div", { class: "sliders" }, nib("ATTACK", "ad", true), nib("DECAY", "ad", false), nib("SUSTAIN", "sr", true), nib("RELEASE", "sr", false))),
+    card("Pulse", lv(() => pwCurve(state.ed.b)),
+      el("div", { class: "sliders" },
+        slider("WIDTH", (b[F.pw_hi] & 15) << 8 | b[F.pw_lo], 0, 4095, v => { b[F.pw_hi] = v >> 8; b[F.pw_lo] = v & 255; edChanged(false); }, v => (v / 40.95).toFixed(1) + "%"),
+        field("SPEED", "pw_speed", -128, 127), field("MIN", "pw_min", 0, 255, v => v * 16), field("MAX", "pw_max", 0, 255, v => v * 16)),
+      el("p", { class: "sub" }, wave & 0x40 ? "The width moves by SPEED each frame, turning back at MIN and MAX." : "Heard with the pulse waveform only.")),
+    card("Filter", lv(() => cutCurve(state.ed.b)),
+      el("div", { class: "toggles" }, bitToggle("LOW", "mode", 0x10), bitToggle("BAND", "mode", 0x20), bitToggle("HIGH", "mode", 0x40)),
+      el("div", { class: "sliders" }, field("CUTOFF", "cut", 0, 255), field("RESONANCE", "res", 0, 15),
+        field("SPEED", "cut_speed", -128, 127), field("END", "cut_end", 0, 255)),
+      el("p", { class: "sub" }, b[F.flags] & PF_FILTER ? (mode ? "Each note restarts the sweep for its chip's three voices." : "No mode picked: the filtered voice is silent.") :
+        "FILTER is off in Sound: the voice bypasses the filter.")),
+    card("Vibrato", lv(() => vibCurve(state.ed.b)),
+      el("div", { class: "sliders" }, field("DELAY", "vib_delay", 0, 255, v => v * 20 + " ms"), field("SPEED", "vib_speed", 0, 255), field("DEPTH", "vib_depth", 0, 255, v => v + " ct"))),
+    card("Wavetable",
+      el("div", { class: "sliders" }, field("LENGTH", "wt_len", 0, WT_MAX, v => v || "off"), field("LOOP TO", "wt_loop", 0, WT_MAX, v => v < b[F.wt_len] ? "step " + (v + 1) : "hold last")),
+      wtTable(b),
+      lv(() => el("p", { class: "sub" }, state.ed.b[F.wt_len] ? "Steps, a frame each: " + wtOrder(state.ed.b) :
+        "One step a frame (50 a second): a waveform and a note each, for drums and arpeggios. Length 0 turns it off."))),
+  );
+  refresh();
+  if (focus) cards.querySelector(`[aria-label="${focus}"]`)?.focus();
+}
+$("edname").oninput = () => { state.ed.b = withName(state.ed.b, $("edname").value || " "); edChanged(); };
+$("edrevert").onclick = () => { state.ed.b = state.ed.base.slice(); edChanged(); };
+$("edsave").onclick = () => shownJob("Saving", async () => {
+  const s = state.ed.slot, b = sane(state.ed.b);
+  await writeSlot(s, b);
+  await keep();
+  state.ed.base = b.slice();
+  renderEditor(); renderLib(); renderSlotMenu();
+  setStatus(`${nameOf(b)} saved in ${slotName(s)}.`, "ok");
+});
+$("edexport").onclick = () => download(`${nameOf(state.ed.b).replace(/[^A-Z0-9]+/gi, "_") || "patch"}.json`, JSON.stringify(toJson(state.ed.b), null, 1));
+
+// ==== c64 begin: a 6502 (NMOS, with the stable undocumented opcodes) and enough of a C64 to run a PSID tune's
+// init and play and catch its SID writes. tests/c64_test.js runs this section on its own.
+const OPS = (() => {                             // [mnemonic, mode, cycles]; "+": a page crossed costs a cycle more
+  const t = `BRK imp 7|ORA izx 6|JAM imp 2|SLO izx 8|NOP zp 3|ORA zp 3|ASL zp 5|SLO zp 5|PHP imp 3|ORA imm 2|ASL acc 2|ANC imm 2|NOP abs 4|ORA abs 4|ASL abs 6|SLO abs 6|
+BPL rel 2|ORA izy 5+|JAM imp 2|SLO izy 8|NOP zpx 4|ORA zpx 4|ASL zpx 6|SLO zpx 6|CLC imp 2|ORA aby 4+|NOP imp 2|SLO aby 7|NOP abx 4+|ORA abx 4+|ASL abx 7|SLO abx 7|
+JSR abs 6|AND izx 6|JAM imp 2|RLA izx 8|BIT zp 3|AND zp 3|ROL zp 5|RLA zp 5|PLP imp 4|AND imm 2|ROL acc 2|ANC imm 2|BIT abs 4|AND abs 4|ROL abs 6|RLA abs 6|
+BMI rel 2|AND izy 5+|JAM imp 2|RLA izy 8|NOP zpx 4|AND zpx 4|ROL zpx 6|RLA zpx 6|SEC imp 2|AND aby 4+|NOP imp 2|RLA aby 7|NOP abx 4+|AND abx 4+|ROL abx 7|RLA abx 7|
+RTI imp 6|EOR izx 6|JAM imp 2|SRE izx 8|NOP zp 3|EOR zp 3|LSR zp 5|SRE zp 5|PHA imp 3|EOR imm 2|LSR acc 2|ALR imm 2|JMP abs 3|EOR abs 4|LSR abs 6|SRE abs 6|
+BVC rel 2|EOR izy 5+|JAM imp 2|SRE izy 8|NOP zpx 4|EOR zpx 4|LSR zpx 6|SRE zpx 6|CLI imp 2|EOR aby 4+|NOP imp 2|SRE aby 7|NOP abx 4+|EOR abx 4+|LSR abx 7|SRE abx 7|
+RTS imp 6|ADC izx 6|JAM imp 2|RRA izx 8|NOP zp 3|ADC zp 3|ROR zp 5|RRA zp 5|PLA imp 4|ADC imm 2|ROR acc 2|ARR imm 2|JMP ind 5|ADC abs 4|ROR abs 6|RRA abs 6|
+BVS rel 2|ADC izy 5+|JAM imp 2|RRA izy 8|NOP zpx 4|ADC zpx 4|ROR zpx 6|RRA zpx 6|SEI imp 2|ADC aby 4+|NOP imp 2|RRA aby 7|NOP abx 4+|ADC abx 4+|ROR abx 7|RRA abx 7|
+NOP imm 2|STA izx 6|NOP imm 2|SAX izx 6|STY zp 3|STA zp 3|STX zp 3|SAX zp 3|DEY imp 2|NOP imm 2|TXA imp 2|ANE imm 2|STY abs 4|STA abs 4|STX abs 4|SAX abs 4|
+BCC rel 2|STA izy 6|JAM imp 2|SHA izy 6|STY zpx 4|STA zpx 4|STX zpy 4|SAX zpy 4|TYA imp 2|STA aby 5|TXS imp 2|TAS aby 5|SHY abx 5|STA abx 5|SHX aby 5|SHA aby 5|
+LDY imm 2|LDA izx 6|LDX imm 2|LAX izx 6|LDY zp 3|LDA zp 3|LDX zp 3|LAX zp 3|TAY imp 2|LDA imm 2|TAX imp 2|LXA imm 2|LDY abs 4|LDA abs 4|LDX abs 4|LAX abs 4|
+BCS rel 2|LDA izy 5+|JAM imp 2|LAX izy 5+|LDY zpx 4|LDA zpx 4|LDX zpy 4|LAX zpy 4|CLV imp 2|LDA aby 4+|TSX imp 2|LAS aby 4+|LDY abx 4+|LDA abx 4+|LDX aby 4+|LAX aby 4+|
+CPY imm 2|CMP izx 6|NOP imm 2|DCP izx 8|CPY zp 3|CMP zp 3|DEC zp 5|DCP zp 5|INY imp 2|CMP imm 2|DEX imp 2|SBX imm 2|CPY abs 4|CMP abs 4|DEC abs 6|DCP abs 6|
+BNE rel 2|CMP izy 5+|JAM imp 2|DCP izy 8|NOP zpx 4|CMP zpx 4|DEC zpx 6|DCP zpx 6|CLD imp 2|CMP aby 4+|NOP imp 2|DCP aby 7|NOP abx 4+|CMP abx 4+|DEC abx 7|DCP abx 7|
+CPX imm 2|SBC izx 6|NOP imm 2|ISC izx 8|CPX zp 3|SBC zp 3|INC zp 5|ISC zp 5|INX imp 2|SBC imm 2|NOP imp 2|SBC imm 2|CPX abs 4|SBC abs 4|INC abs 6|ISC abs 6|
+BEQ rel 2|SBC izy 5+|JAM imp 2|ISC izy 8|NOP zpx 4|SBC zpx 4|INC zpx 6|ISC zpx 6|SED imp 2|SBC aby 4+|NOP imp 2|ISC aby 7|NOP abx 4+|SBC abx 4+|INC abx 7|ISC abx 7`;
+  return t.split("|").map(x => { const [n, m, c] = x.trim().split(" "); return [n, m, parseInt(c), c.endsWith("+")]; });
+})();
+class Cia {                                     // a 6526: its two timers and interrupt flags (no ports, clock or serial)
+  constructor() { this.la = this.lb = this.ca = this.cb = 0xFFFF; this.cra = this.crb = this.mask = this.flags = 0; }
+  static count(t, dt) {                         // a timer down by dt: its underflows (it reloads after reaching 0)
+    if (dt <= t.c) { t.c -= dt; return 0; }
+    const p = t.l + 1, n = Math.floor((dt - t.c - 1) / p) + 1;
+    t.c = p - 1 - (dt - t.c - 1) % p;
+    return n;
+  }
+  run(dt) {
+    let ua = 0, ub = 0;
+    if (this.cra & 1) {
+      const t = { c: this.ca, l: this.la };
+      ua = Cia.count(t, dt);
+      this.ca = t.c;
+      if (ua && this.cra & 8) { this.cra &= 0xFE; this.ca = this.la; }   // (one shot)
+    }
+    if (this.crb & 1) {
+      const by = this.crb >> 5 & 3, d = by === 0 ? dt : by === 2 ? ua : 0;   // (CNT pin counts: never, here)
+      const t = { c: this.cb, l: this.lb };
+      ub = Cia.count(t, d);
+      this.cb = t.c;
+      if (ub && this.crb & 8) { this.crb &= 0xFE; this.cb = this.lb; }
+    }
+    if (ua) this.flags |= 1;
+    if (ub) this.flags |= 2;
+  }
+  get irq() { return !!(this.flags & this.mask); }
+  rd(r) {
+    switch (r) {
+    case 4: return this.ca & 255;
+    case 5: return this.ca >> 8;
+    case 6: return this.cb & 255;
+    case 7: return this.cb >> 8;
+    case 0xD: { const v = this.flags | (this.irq ? 0x80 : 0); this.flags = 0; return v; }
+    case 0xE: return this.cra & 0xEF;
+    case 0xF: return this.crb & 0xEF;
+    default: return r < 2 ? 0xFF : 0;          // (ports: no keys down)
+    }
+  }
+  wr(r, v) {
+    switch (r) {
+    case 4: this.la = this.la & 0xFF00 | v; break;
+    case 5: this.la = this.la & 255 | v << 8; if (!(this.cra & 1)) this.ca = this.la; break;
+    case 6: this.lb = this.lb & 0xFF00 | v; break;
+    case 7: this.lb = this.lb & 255 | v << 8; if (!(this.crb & 1)) this.cb = this.lb; break;
+    case 0xD: if (v & 0x80) this.mask |= v & 0x1F; else this.mask &= ~v & 0x1F; break;
+    case 0xE: if (v & 0x10) this.ca = this.la; this.cra = v & 0xEF; break;
+    case 0xF: if (v & 0x10) this.cb = this.lb; this.crb = v & 0xEF; break;
+    }
+  }
+}
+class C64 {
+  constructor() {
+    this.ram = new Uint8Array(65536);
+    this.io = new Uint8Array(4096);
+    // no KERNAL, but for what tunes lean on: its IRQ entry (A, X, Y pushed, JMP ($0314)) and exits ($EA31: CIA 1
+    // acknowledged; $EA81: Y, X, A pulled, RTI), its NMI entry (JMP ($0318)) and default NMI (CIA 2 acknowledged).
+    // Anything else a tune calls there returns at once
+    this.rom = new Uint8Array(8192).fill(0x60);
+    const put = (a, ...b) => this.rom.set(b, a - 0xE000);
+    put(0xFF48, 0x48, 0x8A, 0x48, 0x98, 0x48, 0x6C, 0x14, 0x03);
+    put(0xEA31, 0xAD, 0x0D, 0xDC, 0x68, 0xA8, 0x68, 0xAA, 0x68, 0x40);
+    put(0xEA81, 0x68, 0xA8, 0x68, 0xAA, 0x68, 0x40);
+    put(0xFE43, 0x78, 0x6C, 0x18, 0x03);
+    put(0xFE47, 0x48, 0xAD, 0x0D, 0xDD, 0x68, 0x40);
+    put(0xFFFA, 0x43, 0xFE, 0x00, 0x00, 0x48, 0xFF);
+    this.ram.set([0x31, 0xEA, 0x66, 0xFE, 0x47, 0xFE], 0x314);
+    this.cia = [new Cia(), new Cia()];
+    this.cia[0].la = this.cia[0].ca = 0x4025;   // CIA 1 timer A: 60 Hz, as a C64 starts
+    this.rcmp = 0; this.vflags = 0; this.ven = 0; this.hwAt = 0;   // the VIC's raster interrupt
+    this.ints = false;                          // true: interrupts are taken (RSID); PSID's play is called instead
+    this.nmiWas = false; this.nmiDue = false;
+    this.a = this.x = this.y = 0; this.s = 0xFD; this.p = 0x24; this.pc = 0; this.cycles = 0;
+    this.flat = false;                          // true: 64K of RAM, no C64 (for the CPU tests)
+    this.sids = [0xD400]; this.onSid = null; this.jam = false; this.lfsr = 0x7FFFF8;
+  }
+  rd(a) {
+    if (a >= 0xD000 && !this.flat) {
+      const b = this.ram[1] & 7;                // LORAM 1, HIRAM 2, CHAREN 4
+      if (a < 0xE000) { if (b & 3 && b & 4) return this.ioRd(a & 0xFFF); }
+      else if (b & 2) return this.rom[a - 0xE000];
+    }
+    return this.ram[a];
+  }
+  wr(a, v) {
+    if (a >= 0xD000 && a < 0xE000 && !this.flat) {
+      const b = this.ram[1] & 7;
+      if (b & 3 && b & 4) { this.ioWr(a, v); return; }
+    }
+    this.ram[a] = v;
+  }
+  raster() { return Math.floor(this.cycles / 63) % 312; }
+  ioRd(r) {
+    if (r === 0x012) return this.raster() & 255;
+    if (r === 0x011) return this.io[r] & 0x7F | (this.raster() > 255 ? 0x80 : 0);
+    if (r >= 0x400 && r < 0x800) {
+      if ((r & 0x1F) === 0x1B) {               // OSC3: noise for tunes that use it as random numbers
+        for (let k = 0; k < 8; k++) this.lfsr = (this.lfsr << 1 | (this.lfsr >> 22 ^ this.lfsr >> 17) & 1) & 0x7FFFFF;
+        return this.lfsr & 255;
+      }
+      return 0;
+    }
+    if (r >= 0xC00 && r < 0xE00) { this.hw(); return this.cia[r >> 8 & 1].rd(r & 15); }
+    if (r === 0x019) { this.hw(); return this.vflags | (this.vflags & this.ven ? 0x80 : 0) | 0x70; }
+    if (r === 0x01A) return this.ven | 0xF0;
+    return this.io[r];
+  }
+  ioWr(a, v) {
+    const r = a & 0xFFF;
+    let chip = this.sids.findIndex((b, k) => k && (a & 0xFFE0) === b);
+    if (chip < 0 && r >= 0x400 && r < 0x800) chip = 0;   // (the first SID shows through $D400-$D7FF)
+    if (chip >= 0 && this.onSid) this.onSid(chip, a & 0x1F, v);
+    if (r >= 0xC00 && r < 0xE00) { this.hw(); this.cia[r >> 8 & 1].wr(r & 15, v); }
+    else if (r === 0x011) this.rcmp = this.rcmp & 255 | (v & 0x80) << 1;
+    else if (r === 0x012) this.rcmp = this.rcmp & 0x100 | v;
+    else if (r === 0x019) this.vflags &= ~v & 15;
+    else if (r === 0x01A) this.ven = v & 15;
+    this.io[r] = v;
+  }
+  hw() {                                        // the timers and the raster beam up to now
+    const dt = this.cycles - this.hwAt;
+    if (dt <= 0) return;
+    const from = Math.floor(this.hwAt / 63), to = Math.floor(this.cycles / 63);
+    this.hwAt = this.cycles;
+    this.cia[0].run(dt); this.cia[1].run(dt);
+    if (to - from >= 312) this.vflags |= 1;
+    else for (let l = from + 1; l <= to; l++) if (l % 312 === this.rcmp) this.vflags |= 1;
+    const nmi = this.cia[1].irq;
+    if (nmi && !this.nmiWas) this.nmiDue = true;   // (an edge)
+    this.nmiWas = nmi;
+  }
+  interrupt() {                                 // RSID: an NMI or IRQ due is taken (true)
+    this.hw();
+    let v = 0;
+    if (this.nmiDue) { this.nmiDue = false; v = 0xFFFA; }
+    else if (!(this.p & 4) && (this.cia[0].irq || this.vflags & this.ven)) v = 0xFFFE;
+    if (!v) return false;
+    this.push(this.pc >> 8); this.push(this.pc & 255); this.push(this.p & 0xEF | 0x20);
+    this.p |= 4;
+    this.pc = this.rd(v) | this.rd(v + 1) << 8;
+    this.cycles += 7;
+    return true;
+  }
+  push(v) { this.ram[0x100 | this.s] = v; this.s = this.s - 1 & 255; }
+  pull() { this.s = this.s + 1 & 255; return this.ram[0x100 | this.s]; }
+  nz(v) { this.p = this.p & 0x7D | v & 0x80 | (v ? 0 : 2); return v; }
+  carry(c) { this.p = this.p & 0xFE | (c ? 1 : 0); }
+  adc(v) {
+    const a = this.a, c = this.p & 1;
+    if (this.p & 8) {                           // NMOS decimal: N and V from the half-adjusted sum, Z from the binary one
+      let t = (a & 15) + (v & 15) + c;
+      if (t > 9) t += 6;
+      t = t <= 15 ? (t & 15) + (a & 0xF0) + (v & 0xF0) : (t & 15) + (a & 0xF0) + (v & 0xF0) + 0x10;
+      this.p = this.p & 0x3C | (a + v + c & 255 ? 0 : 2) | t & 0x80 | ((a ^ t) & 0x80 && !((a ^ v) & 0x80) ? 0x40 : 0);
+      if ((t & 0x1F0) > 0x90) t += 0x60;
+      this.carry((t & 0xFF0) > 0xF0);
+      this.a = t & 255;
+    } else {
+      const r = a + v + c;
+      this.p = this.p & 0xBF | (~(a ^ v) & (a ^ r) & 0x80 ? 0x40 : 0);
+      this.carry(r > 255);
+      this.a = this.nz(r & 255);
+    }
+  }
+  sbc(v) {
+    const a = this.a, b = 1 - (this.p & 1), r = a - v - b;
+    this.p = this.p & 0xBF | ((a ^ v) & (a ^ r) & 0x80 ? 0x40 : 0);
+    this.nz(r & 255);
+    this.carry(r >= 0);
+    if (this.p & 8) {
+      let lo = (a & 15) - (v & 15) - b;
+      let t = lo & 0x10 ? (lo - 6 & 15) | (a & 0xF0) - (v & 0xF0) - 0x10 : (lo & 15) | (a & 0xF0) - (v & 0xF0);
+      if (t & 0x100) t -= 0x60;
+      this.a = t & 255;
+    } else this.a = r & 255;
+  }
+  cmp(r, v) { const d = r - v; this.carry(d >= 0); this.nz(d & 255); }
+  step() {
+    const o = this.rd(this.pc), [n, mode, cyc, pen] = OPS[o];
+    let pc = this.pc + 1 & 0xFFFF, ad = 0, cross = 0, hi = 0;
+    const w16 = a => this.rd(a) | this.rd(a + 1 & 0xFFFF) << 8;
+    switch (mode) {
+    case "imm": ad = pc; pc++; break;
+    case "zp": ad = this.rd(pc); pc++; break;
+    case "zpx": ad = this.rd(pc) + this.x & 255; pc++; break;
+    case "zpy": ad = this.rd(pc) + this.y & 255; pc++; break;
+    case "abs": ad = w16(pc); pc += 2; break;
+    case "abx": hi = w16(pc); ad = hi + this.x & 0xFFFF; cross = (hi ^ ad) & 0x100; hi >>= 8; pc += 2; break;
+    case "aby": hi = w16(pc); ad = hi + this.y & 0xFFFF; cross = (hi ^ ad) & 0x100; hi >>= 8; pc += 2; break;
+    case "ind": { const p = w16(pc); ad = this.rd(p) | this.rd(p & 0xFF00 | p + 1 & 255) << 8; pc += 2; break; }   // (the page wrap bug)
+    case "izx": { const z = this.rd(pc) + this.x & 255; ad = this.rd(z) | this.rd(z + 1 & 255) << 8; pc++; break; }
+    case "izy": { const z = this.rd(pc); hi = this.rd(z) | this.rd(z + 1 & 255) << 8; ad = hi + this.y & 0xFFFF; cross = (hi ^ ad) & 0x100; hi >>= 8; pc++; break; }
+    case "rel": { const d = this.rd(pc); pc++; ad = pc + (d << 24 >> 24) & 0xFFFF; break; }
+    }
+    pc &= 0xFFFF;
+    this.pc = pc;
+    this.cycles += cyc + (cross && pen ? 1 : 0);
+    const branch = c => { if (c) { this.cycles += (pc ^ ad) & 0x100 ? 2 : 1; this.pc = ad; } };
+    const rmw = f => {                          // (the old value is written first, as the chip does: INC $D019 relies on it)
+      const o = this.rd(ad), v = f(o) & 255;
+      this.wr(ad, o); this.wr(ad, v);
+      return v;
+    };
+    const shift = f => { if (mode === "acc") this.a = this.nz(f(this.a) & 255); else this.nz(rmw(f)); };
+    const asl = v => { this.carry(v & 0x80); return v << 1; }, lsr = v => { this.carry(v & 1); return v >> 1; };
+    const rol = v => { const c = this.p & 1; this.carry(v & 0x80); return v << 1 | c; };
+    const ror = v => { const c = this.p & 1; this.carry(v & 1); return v >> 1 | c << 7; };
+    switch (n) {
+    case "LDA": this.a = this.nz(this.rd(ad)); break;
+    case "LDX": this.x = this.nz(this.rd(ad)); break;
+    case "LDY": this.y = this.nz(this.rd(ad)); break;
+    case "LAX": this.a = this.x = this.nz(this.rd(ad)); break;
+    case "STA": this.wr(ad, this.a); break;
+    case "STX": this.wr(ad, this.x); break;
+    case "STY": this.wr(ad, this.y); break;
+    case "SAX": this.wr(ad, this.a & this.x); break;
+    case "TAX": this.x = this.nz(this.a); break;
+    case "TAY": this.y = this.nz(this.a); break;
+    case "TXA": this.a = this.nz(this.x); break;
+    case "TYA": this.a = this.nz(this.y); break;
+    case "TSX": this.x = this.nz(this.s); break;
+    case "TXS": this.s = this.x; break;
+    case "PHA": this.push(this.a); break;
+    case "PHP": this.push(this.p | 0x30); break;
+    case "PLA": this.a = this.nz(this.pull()); break;
+    case "PLP": this.p = this.pull() & 0xCF | 0x20; break;
+    case "ORA": this.a = this.nz(this.a | this.rd(ad)); break;
+    case "AND": this.a = this.nz(this.a & this.rd(ad)); break;
+    case "EOR": this.a = this.nz(this.a ^ this.rd(ad)); break;
+    case "ADC": this.adc(this.rd(ad)); break;
+    case "SBC": this.sbc(this.rd(ad)); break;
+    case "CMP": this.cmp(this.a, this.rd(ad)); break;
+    case "CPX": this.cmp(this.x, this.rd(ad)); break;
+    case "CPY": this.cmp(this.y, this.rd(ad)); break;
+    case "BIT": { const v = this.rd(ad); this.p = this.p & 0x3D | v & 0xC0 | (this.a & v ? 0 : 2); break; }
+    case "INC": this.nz(rmw(v => v + 1)); break;
+    case "DEC": this.nz(rmw(v => v - 1)); break;
+    case "INX": this.x = this.nz(this.x + 1 & 255); break;
+    case "INY": this.y = this.nz(this.y + 1 & 255); break;
+    case "DEX": this.x = this.nz(this.x - 1 & 255); break;
+    case "DEY": this.y = this.nz(this.y - 1 & 255); break;
+    case "ASL": shift(asl); break;
+    case "LSR": shift(lsr); break;
+    case "ROL": shift(rol); break;
+    case "ROR": shift(ror); break;
+    case "JMP": this.pc = ad; break;
+    case "JSR": {                               // (the address's high byte is read after the pushes, as the chip does)
+      const r = pc - 1 & 0xFFFF;
+      this.push(r >> 8); this.push(r & 255);
+      this.pc = ad & 255 | this.rd(r) << 8;
+      break;
+    }
+    case "RTS": this.pc = (this.pull() | this.pull() << 8) + 1 & 0xFFFF; break;
+    case "RTI": this.p = this.pull() & 0xCF | 0x20; this.pc = this.pull() | this.pull() << 8; break;
+    case "BRK": { const r = pc + 1 & 0xFFFF; this.push(r >> 8); this.push(r & 255); this.push(this.p | 0x30); this.p |= 4; this.pc = w16(0xFFFE); break; }
+    case "BPL": branch(!(this.p & 0x80)); break;
+    case "BMI": branch(this.p & 0x80); break;
+    case "BVC": branch(!(this.p & 0x40)); break;
+    case "BVS": branch(this.p & 0x40); break;
+    case "BCC": branch(!(this.p & 1)); break;
+    case "BCS": branch(this.p & 1); break;
+    case "BNE": branch(!(this.p & 2)); break;
+    case "BEQ": branch(this.p & 2); break;
+    case "CLC": this.p &= 0xFE; break;
+    case "SEC": this.p |= 1; break;
+    case "CLI": this.p &= 0xFB; break;
+    case "SEI": this.p |= 4; break;
+    case "CLV": this.p &= 0xBF; break;
+    case "CLD": this.p &= 0xF7; break;
+    case "SED": this.p |= 8; break;
+    case "NOP": if (mode !== "imp") this.rd(ad); break;
+    case "JAM": this.jam = true; this.pc = this.pc - 1 & 0xFFFF; break;
+    case "SLO": this.a = this.nz(this.a | rmw(asl)); break;
+    case "RLA": this.a = this.nz(this.a & rmw(rol)); break;
+    case "SRE": this.a = this.nz(this.a ^ rmw(lsr)); break;
+    case "RRA": this.adc(rmw(ror)); break;
+    case "DCP": this.cmp(this.a, rmw(v => v - 1)); break;
+    case "ISC": this.sbc(rmw(v => v + 1)); break;
+    case "ANC": this.a = this.nz(this.a & this.rd(ad)); this.carry(this.a & 0x80); break;
+    case "ALR": this.a = this.nz(lsr(this.a & this.rd(ad))); break;
+    case "ARR": {                               // (decimal mode as the NMOS part does it)
+      const t = this.a & this.rd(ad), c = this.p & 1;
+      let a = t >> 1 | c << 7;
+      if (!(this.p & 8)) {
+        this.nz(a);
+        this.carry(a & 0x40);
+        this.p = this.p & 0xBF | ((a ^ a << 1) & 0x40);
+      } else {
+        this.p = this.p & 0x3D | c << 7 | (a ? 0 : 2) | ((t ^ a) & 0x40);
+        if ((t & 15) + (t & 1) > 5) a = a & 0xF0 | (a + 6) & 15;
+        const hc = (t >> 4) + (t >> 4 & 1) > 5;
+        if (hc) a = a + 0x60 & 255;
+        this.carry(hc);
+      }
+      this.a = a;
+      break;
+    }
+    case "SBX": { const d = (this.a & this.x) - this.rd(ad); this.carry(d >= 0); this.x = this.nz(d & 255); break; }
+    case "LAS": this.a = this.x = this.s = this.nz(this.rd(ad) & this.s); break;
+    case "ANE": this.a = this.nz((this.a | 0xEE) & this.x & this.rd(ad)); break;   // (unstable on a real 6510)
+    case "LXA": this.a = this.x = this.nz((this.a | 0xEE) & this.rd(ad)); break;
+    case "SHA": this.wr(ad, this.a & this.x & (hi + 1 & 255)); break;
+    case "SHX": this.wr(ad, this.x & (hi + 1 & 255)); break;
+    case "SHY": this.wr(ad, this.y & (hi + 1 & 255)); break;
+    case "TAS": this.s = this.a & this.x; this.wr(ad, this.s & (hi + 1 & 255)); break;
+    }
+  }
+}
+
+// a .sid file (docs: HVSC's SID_file_format.txt). An RSID tune sets up its own interrupts, as on a C64
+function psid(b) {
+  const w = o => b[o] << 8 | b[o + 1];
+  const str = o => { let s = ""; for (let i = o; i < o + 32 && b[i]; i++) s += String.fromCharCode(b[i]); return s.trim(); };
+  const magic = String.fromCharCode(...b.slice(0, 4));
+  if (magic !== "PSID" && magic !== "RSID" || b.length < 0x78) throw new Error("not a .sid file");
+  const version = w(4), flags = version >= 2 ? w(0x76) : 0, rsid = magic === "RSID";
+  if (rsid && flags & 2) throw new Error("an RSID tune that starts a BASIC program: this page has no BASIC");
+  if (!rsid && flags & 1) throw new Error("a Compute! Sidplayer (MUS) tune: it needs a player this page does not have");
+  let load = w(8), data = b.slice(w(6));
+  if (!load) { load = data[0] | data[1] << 8; data = data.slice(2); }
+  if (load + data.length > 0x10000) throw new Error("the tune does not fit in memory");
+  const s2 = version === 3 || version === 4 ? b[0x7A] : 0;   // (v5 describes extra SIDs another way: not read)
+  const speed = (w(0x12) << 16 | w(0x14)) >>> 0, ps = version === 1 || flags & 2;
+  return {
+    rsid, name: str(0x16), author: str(0x36), released: str(0x56), songs: w(0xE), start: w(0x10) || 1,
+    load, init: w(0xA) || load, play: w(0xC), data, clock: flags >> 2 & 3, model: flags >> 4 & 3,
+    sid2: !(s2 & 1) && (s2 >= 0x42 && s2 <= 0x7E || s2 >= 0xE0) ? 0xD000 | s2 << 4 : 0,
+    cia: n => speed >> (ps ? (n - 1) % 32 : Math.min(n - 1, 31)) & 1,
+  };
+}
+const PAL_CLOCK = 985248, PAL_FRAME = 19656;    // cycles a second, and a frame (312 lines of 63)
+function sidRun(t, song, secs) {                // { rate, init (writes), frames (writes a call), error }: each
+  const m = new C64();                          // write [chip, register, value]
+  m.ram.set(t.data, t.load);
+  m.ram[0x2A6] = t.clock === 2 ? 0 : 1;
+  if (t.sid2) m.sids.push(t.sid2);
+  if (t.rsid) return rsidRun(m, t, song, secs);
+  let writes = [];
+  const vol = [];
+  m.onSid = (c, r, v) => { writes.push([c, r, v]); if (r === 0x18) vol.push([m.cycles, c, v]); };
+  const bank = a => a < 0xA000 ? 0x37 : a < 0xD000 ? 0x36 : a >= 0xE000 ? 0x35 : 0x34;   // as the format says
+  const run = (s0, limit) => {                  // until it returns to $0000 with the stack at s0
+    const end = m.cycles + limit;
+    while (!(m.pc === 0 && m.s === s0) && !m.jam && m.cycles < end) m.step();
+    return m.pc === 0 && m.s === s0;
+  };
+  const out = { rate: 50, init: null, frames: [], error: null, vol };
+  m.ram[1] = bank(t.init);
+  m.a = song - 1 & 255;
+  let s0 = m.s;
+  m.push(0xFF); m.push(0xFF);                   // (RTS: $FFFF + 1)
+  m.pc = t.init;
+  const ok = run(s0, PAL_CLOCK * 5);
+  out.init = writes;
+  if (!ok) { out.error = m.jam ? `init stopped at $${m.pc.toString(16)}` : "init did not return"; return out; }
+  const per = t.cia(song) ? m.cia[0].la + 1 : PAL_FRAME;
+  out.rate = PAL_CLOCK / per;
+  const n = Math.round(secs * out.rate);
+  for (let f = 0; f < n; f++) {
+    writes = [];
+    m.cycles = Math.max(m.cycles, (f + 1) * per);
+    s0 = m.s;
+    if (t.play) {
+      m.ram[1] = bank(t.play);
+      m.push(0xFF); m.push(0xFF);
+      m.pc = t.play;
+    } else {                                    // an interrupt, through the tune's own vector
+      m.push(0); m.push(0); m.push(m.p & 0xEF | 0x20);
+      m.p |= 4;
+      m.pc = m.rd(0xFFFE) | m.rd(0xFFFF) << 8;
+    }
+    const done = run(s0, per * 20);
+    out.frames.push(writes);
+    if (!done) { out.error = `play ${m.jam ? "stopped" : "did not return"} at $${m.pc.toString(16)}, call ${f + 1}`; break; }
+  }
+  return out;
+}
+function rsidRun(m, t, song, secs) {            // as a C64 runs it, by the clock: its writes a PAL frame each
+  const out = { rate: PAL_CLOCK / PAL_FRAME, init: [], frames: [], error: null, vol: [] }, end = Math.round(secs * PAL_CLOCK);
+  m.onSid = (c, r, v) => {
+    const f = Math.floor(m.cycles / PAL_FRAME);
+    while (out.frames.length <= f) out.frames.push([]);
+    out.frames[f].push([c, r, v]);
+    if (r === 0x18) out.vol.push([m.cycles, c, v]);   // (to the cycle, for samples)
+  };
+  m.ram[1] = 0x37;
+  m.cia[0].cra = 1; m.cia[0].mask = 1;          // (60 Hz interrupts on; the raster's set to line $137, off)
+  m.rcmp = 0x137;
+  m.p = 0x20;
+  m.ints = true;
+  m.a = song - 1 & 255;
+  m.push(0xFF); m.push(0xFF);                   // (init's RTS: to $0000, where it waits for interrupts)
+  m.pc = t.init;
+  while (m.cycles < end && !m.jam) {
+    m.interrupt();
+    if (m.pc === 0) m.cycles += 63;             // waiting
+    else m.step();
+  }
+  const n = Math.round(secs * out.rate);         // (whole frames, as many as PSID gives)
+  while (out.frames.length < n) out.frames.push([]);
+  out.frames.length = n;
+  if (m.jam) out.error = `stopped at $${m.pc.toString(16)}, ${(m.cycles / PAL_CLOCK).toFixed(1)} s in`;
+  return out;
+}
+// ==== c64 end
+// ==== sidpatch begin: a tune's SID writes (sidRun's) -> its instruments, as patch fields (docs/MIDI.md 3).
+// A note is a gate switched on. What its voice does from there, looked at 50 times a second as the FM-1's player
+// runs, becomes a patch: the envelope then, the waveform and pitch steps, the pulse and filter sweeps, vibrato.
+// tests/extract_test.js checks it against the FM-1's own player.
+const NOTE_SPAN = 64;                           // frames of a note looked at (1.28 s)
+function sidCalls(run) {                        // after each call: both chips' registers, and per voice a gate
+  const regs = [new Uint8Array(32), new Uint8Array(32)], out = [];   // switched on, and a hard restart (the
+  for (const [c, r, v] of run.init) if (c < 2) regs[c][r] = v;      // envelope at 0, or the test bit, gate off)
+  for (const writes of run.frames) {
+    const on = [0, 0, 0, 0, 0, 0], hr = [0, 0, 0, 0, 0, 0];
+    for (const [c, r, v] of writes) {
+      if (c > 1 || r > 0x18) continue;
+      const k = r < 21 ? Math.floor(r / 7) : -1, vi = c * 3 + k;
+      if (k >= 0 && r % 7 === 4) {
+        if (v & 1 && !(regs[c][r] & 1)) on[vi] = 1;
+        if (v & 8 && !(v & 1)) hr[vi] = 1;
+      }
+      regs[c][r] = v;
+      if (k >= 0 && r % 7 >= 5 && !regs[c][k * 7 + 5] && !regs[c][k * 7 + 6]) hr[vi] = 1;
+    }
+    out.push({ regs: regs.map(x => x.slice()), on, hr });
+  }
+  return out;
+}
+const vreg = (s, vi, r) => s.regs[vi / 3 | 0][vi % 3 * 7 + r];
+const notePitch = (freq, clock) => freq ? 69 + 12 * Math.log2(freq * clock / 16777216 / 440) : -1;   // fractional
+const median = a => { const b = a.slice().sort((x, y) => x - y); return b.length ? b[b.length >> 1] : 0; };
+const most = a => { const n = new Map(); let best = a[0], bn = 0; for (const x of a) { const c = (n.get(x) || 0) + 1; n.set(x, c); if (c > bn) { bn = c; best = x; } } return best; };
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function sidNote(calls, vi, i, next, per, clock, cutTo) {   // a note from call i (the gate on) to call next; its
+                                                // chip's filter is its own until call cutTo (the next filtered note)
+  const fr = [];
+  let gated = 0, off = next;
+  for (let c = i; c < next; c++) if (!(vreg(calls[c], vi, 4) & 1)) { off = c; break; }
+  for (let j = 0; j < NOTE_SPAN; j++) {
+    const c = i + Math.round(j * per);
+    if (c >= next) break;
+    const s = calls[c], ch = s.regs[vi / 3 | 0], ctl = vreg(s, vi, 4);
+    if (c < off) gated = j + 1;
+    fr.push({ c, ctl, p: notePitch(vreg(s, vi, 0) | vreg(s, vi, 1) << 8, clock), pw: (vreg(s, vi, 2) | vreg(s, vi, 3) << 8) & 0xFFF,
+              cut: ch[0x15] & 7 | ch[0x16] << 3, filt: ch[0x17] >> vi % 3 & 1, res: ch[0x17] >> 4, mode: ch[0x18] & 0x70 });
+  }
+  let hard = 0;                                 // (in the calls before the gate: in the same one it is just a set up)
+  for (let b = Math.max(0, i - Math.ceil(3 * per)); b < i; b++) if (calls[b].hr[vi]) hard = 1;
+  return { vi, call: i, off, cutTo, ad: vreg(calls[i], vi, 5), sr: vreg(calls[i], vi, 6), hard, fr, gated: Math.max(gated, 1) };
+}
+
+function sidShape(n) {                          // a note -> patch fields, its pitch (MIDI note) and its steps' pitches
+  const fr = n.fr, W = Math.min(fr.length, 32), G = Math.min(n.gated, fr.length);   // W: for the steps; G: held
+  const key = j => (fr[j].ctl & 0xFE) + "/" + Math.round(fr[j].p);
+  let len = 0, loop = 0;
+  // the steps: the shortest start and loop (8 steps at most) that the frames keep repeating
+  const sameWave = fr.slice(0, W).every(x => (x.ctl & 0xFE) === (fr[0].ctl & 0xFE));
+  const ps = fr.slice(0, W).filter(x => x.p >= 0).map(x => x.p), mid = median(ps);
+  if (sameWave && ps.every(p => Math.abs(p - mid) < 1.5)) len = 1;   // (pitch within a semitone or so: vibrato)
+  for (let L = 1; !len && L <= 8; L++)
+    for (let a = 0; a < L && !len; a++) {
+      let ok = true;
+      for (let j = a; j < W && ok; j++) ok = key(j) === key(a + (j - a) % (L - a));
+      if (ok) { len = L; loop = a; }
+    }
+  if (!len) { if (sameWave) len = 1; else { len = Math.min(8, W); loop = len - 1; } }   // (slides are the song's)
+  const base = len === 1 ? Math.round(mid) : Math.round(fr[loop].p);
+  const at = j => fr[Math.min(j, fr.length - 1)];
+  const f = { ad: n.ad, sr: n.sr, wave: at(loop).ctl & 0xFE, flags: (fr[0].filt ? 1 : 0) | (n.hard ? 2 : 0), transpose: 0,
+    wt_len: len > 1 ? len : 0, wt_loop: len > 1 ? loop : 0, wt_abs: 0, wt_ctl: Array(8).fill(0), wt_note: Array(8).fill(0) };
+  const pitches = [];
+  if (len > 1) for (let j = 0; j < len; j++) {
+    f.wt_ctl[j] = at(j).ctl & 0xF0;
+    pitches.push(at(j).p >= 0 ? Math.round(at(j).p) : base);
+    f.wt_note[j] = pitches[j] - base;
+  }
+  // pulse: where it starts, its step a frame, and the limits it turned back at (not seen: as far as it goes)
+  const pw = fr.slice(0, Math.max(G, 2)).map(x => x.pw), dpw = pw.slice(1).map((x, j) => x - pw[j]), npw = dpw.filter(Boolean);
+  f.pw_hi = pw[0] >> 8; f.pw_lo = pw[0] & 255;
+  f.pw_speed = npw.length ? clamp(most(npw.map(Math.abs)), 1, 127) * Math.sign(npw[0]) : 0;
+  const turned = s => dpw.some((d, j) => j && dpw[j - 1] * s > 0 && d * s < 0);
+  f.pw_max = f.pw_speed && turned(1) ? Math.round(Math.max(...pw) / 16) : 255;
+  f.pw_min = f.pw_speed && turned(-1) ? Math.round(Math.min(...pw) / 16) : 0;
+  // filter: as the chip has it at the start, and its sweep until another note restarts it. A sweep still going at
+  // the end goes on as far as it can
+  const cut = fr.filter((x, j) => !j || x.c < n.cutTo).map(x => x.cut), dc = cut.slice(1).map((x, j) => x - cut[j]), nc = dc.filter(Boolean);
+  f.mode = fr[0].mode; f.res = fr[0].res; f.cut = Math.round(cut[0] / 8);
+  f.cut_speed = nc.length ? clamp(most(nc.map(Math.abs)), 1, 127) * Math.sign(nc[0]) : 0;
+  const stopped = nc.length && !dc[dc.length - 1] && n.fr.length === NOTE_SPAN || nc.length && !dc[dc.length - 1] && dc.length > 2 && !dc[dc.length - 2];
+  f.cut_end = !f.cut_speed ? f.cut : stopped ? clamp(Math.round(cut[cut.length - 1] / 8), 0, 255) : f.cut_speed > 0 ? 255 : 0;
+  // vibrato, on a held pitch: cents about the note while gated
+  f.fine = 0; f.vib_delay = 0; f.vib_speed = 0; f.vib_depth = 0;
+  if (len === 1 || (f.wt_len && new Set(pitches.slice(loop)).size === 1)) {
+    const d = [], j0 = f.wt_len ? loop : 0;     // (after the attack's steps)
+    for (let j = j0; j < G; j++) d.push(fr[j].p >= 0 ? (fr[j].p - base) * 100 : 0);
+    if (!d.length) d.push(0);
+    const hi = Math.max(...d), lo = Math.min(...d), c = (hi + lo) / 2, amp = (hi - lo) / 2;
+    let turns = 0;                              // (vibrato swings back and forth; a slide is the song's)
+    for (let j = 2, dir = 0; j < d.length; j++) { const s = Math.sign(d[j] - d[j - 1]); if (s && dir && s !== dir) turns++; if (s) dir = s; }
+    if (amp < 4 || amp > 200 || turns < 2) f.fine = clamp(Math.round(amp > 200 || turns < 2 ? d[0] : median(d)), -50, 50);
+    else {
+      f.fine = clamp(Math.round(c), -50, 50);
+      const start = d.findIndex(x => Math.abs(x - d[0]) > 2);
+      f.vib_delay = clamp(j0 + start, 0, 255);
+      f.vib_depth = clamp(Math.round(amp), 1, 255);
+      // the FM-1's triangle moves speed * depth / 64 cents a frame: its slope gives the speed, even from a short note
+      const slope = median(d.slice(start).map((x, j, a) => j ? Math.abs(x - a[j - 1]) : 0).slice(1).filter(x => x > 0.5));
+      f.vib_speed = clamp(Math.round(slope * 64 / f.vib_depth), 1, 255);
+    }
+    n.vib = d.map((x, j) => [j0 + j, x]);     // (for sidVibFit)
+  }
+  return { f, base, pitches };
+}
+function sidVibFit(f, notes) {                  // vibrato as the FM-1's player makes it, closest to what was heard:
+  const tri = ph => ph < 128 ? ph - 64 : 191 - ph;   // seen 50 times a second its peaks are mostly missed, so the
+  const err = (o, d) => {                           // depth heard falls short. Around the rough guess, the fewest
+    let e = 0;                                      // cents wrong over a few notes
+    for (const v of d) {
+      let ph = 64, j = 0;
+      for (const [k, x] of v) {
+        for (; j < k; j++) if (j + 1 >= o.vib_delay) ph = ph + o.vib_speed & 255;
+        const dev = k >= o.vib_delay ? Math.trunc(tri(ph) * o.vib_depth / 64) : 0;
+        e += (x - dev - o.fine) ** 2;
+      }
+    }
+    return e;
+  };
+  const d = notes.map(n => n.vib).filter(Boolean).slice(0, 3);
+  if (!d.length) return;
+  let best = { fine: f.fine, vib_delay: f.vib_delay, vib_speed: f.vib_speed, vib_depth: f.vib_depth }, be = err(best, d);
+  for (let dep = f.vib_depth; dep <= Math.min(255, f.vib_depth * 1.5 + 2); dep++)
+    for (let sp = Math.max(1, Math.round(f.vib_speed * f.vib_depth / dep) - 3); sp <= Math.min(255, Math.round(f.vib_speed * f.vib_depth / dep) + 3); sp++)
+      for (let dl = Math.max(0, f.vib_delay - 1); dl <= f.vib_delay + 1; dl++)
+        for (let fi = f.fine - 2; fi <= f.fine + 2; fi++) {
+          const o = { fine: clamp(fi, -50, 50), vib_delay: dl, vib_speed: sp, vib_depth: dep }, e = err(o, d);
+          if (e < be) { be = e; best = o; }
+        }
+  Object.assign(f, best);
+}
+
+function sidInstruments(t, run) {               // { instruments: [{ fields, notes, voices }] (most used first), notes }
+  const calls = sidCalls(run), clock = t.clock === 2 ? 1022727 : 985248, per = run.rate / 50, notes = [];
+  const filtered = [[], []];                    // gate ons through each chip's filter: each restarts a sweep
+  calls.forEach((s, i) => { for (let vi = 0; vi < 6; vi++) if (s.on[vi] && s.regs[vi / 3 | 0][0x17] >> vi % 3 & 1) filtered[vi / 3 | 0].push(i); });
+  for (let vi = 0; vi < 6; vi++) {
+    const starts = [], fl = filtered[vi / 3 | 0];
+    calls.forEach((s, i) => { if (s.on[vi]) starts.push(i); });
+    starts.forEach((i, k) => notes.push(sidNote(calls, vi, i, k + 1 < starts.length ? starts[k + 1] : calls.length, per, clock,
+      fl.find(x => x > i) ?? calls.length)));
+  }
+  const groups = new Map();
+  for (const n of notes) {
+    const s = sidShape(n), f = s.f, filt = f.flags & 1;
+    n.base = s.base;
+    const sig = JSON.stringify([f.ad, f.sr, f.wave, filt, f.pw_speed, !!f.vib_depth, f.wt_len, f.wt_loop, f.wt_ctl, f.wt_note]);
+    if (!groups.has(sig)) groups.set(sig, []);
+    groups.get(sig).push({ n, s });
+  }
+  const list = [...groups.values()].sort((a, b) => b.length - a.length).map(g => {
+    const f = { ...g[0].s.f, wt_ctl: g[0].s.f.wt_ctl.slice(), wt_note: g[0].s.f.wt_note.slice() };
+    const pw = median(g.map(x => x.s.f.pw_hi << 8 | x.s.f.pw_lo));
+    f.pw_hi = pw >> 8; f.pw_lo = pw & 255;
+    for (const k of ["cut", "fine", "vib_delay", "vib_speed", "vib_depth"]) f[k] = median(g.map(x => x.s.f[k]));
+    for (const k of ["pw_min", "pw_max", "mode", "res", "cut_speed", "cut_end"]) f[k] = most(g.map(x => x.s.f[k]));
+    if (f.vib_depth) sidVibFit(f, g.map(x => x.n));
+    f.flags = f.flags & 1 | (g.some(x => x.n.hard) ? 2 : 0);   // (a voice's first note has nothing to restart)
+    // a drum: one pitch whatever the song plays, and noise in its steps. Its steps take MIDI notes, so any key plays it
+    if (f.wt_len && new Set(g.map(x => x.n.base)).size === 1 && f.wt_ctl.some(c => c & 0x80)) {
+      f.wt_abs = (1 << f.wt_len) - 1;
+      f.wt_note = g[0].s.pitches.map(p => clamp(p, 0, 107)).concat(Array(8 - f.wt_len).fill(0));
+    }
+    return { fields: f, notes: g.map(x => x.n), voices: [...new Set(g.map(x => x.n.vi))].sort() };
+  });
+  list.forEach((x, k) => { for (const n of x.notes) n.inst = k; });
+  return { instruments: list, notes };
+}
+function tuneShort(name) {                      // "Monty on the Run" -> "MOTR": a patch name leaves room for a number
+  const s = String(name).toUpperCase().replace(/[^A-Z0-9 ]+/g, " ").trim();
+  if (s.length <= 8) return s || "SID";
+  const w = s.split(/\s+/);
+  return w.length > 1 ? w.map(x => /^\d+$/.test(x) ? x : x[0]).join("").slice(0, 8) : s.slice(0, 8);
+}
+// samples: bursts of writes to a volume register (sampled or synthesized drums, as Arkanoid's), each kept as its
+// writes, [value, cycles to the next] at the PAL clock, for the FM-1's kit (docs/MIDI.md 2.6). Hits that are the
+// same (the same steps and gaps, give or take some cycles of interrupt jitter) are one sample
+const SMP_GAP = 1023, KIT_MAX = 16, KIT_WRITES = 8192;
+function sidSamples(t, run) {                   // { samples: [{ writes, hits }] most heard first, hits: [{ t, k }] }
+  const clock = t.clock === 2 ? 1022727 : 985248, vol = run.vol || [], bursts = [];
+  for (let c = 0; c < 2; c++) {
+    const w = vol.filter(x => x[1] === c);
+    const gap = k => k > 0 && k < w.length ? w[k][0] - w[k - 1][0] : Infinity;
+    for (let i = 0; i < w.length; ) {
+      // a write held far longer than those either side, in a run of equal gaps, is the CPU called away (an
+      // interrupt; where it lands varies hit to hit), so the run goes on at its gap. Between two different runs:
+      // the next hit
+      const writes = [];
+      let j = i;
+      for (; j + 1 < w.length; j++) {
+        const g = gap(j + 1), a = j > i ? gap(j) : Infinity, b = gap(j + 2) <= SMP_GAP ? gap(j + 2) : a;
+        if (g > 200 && g < 4000 && a <= SMP_GAP && Math.abs(a - b) <= 2 && g > a + 20) writes.push([w[j][2] & 15, a]);
+        else if (g > SMP_GAP || (g > 200 && a !== Infinity && g > Math.max(a, b) + 20)) break;   // (a run's first gap is some cycles longer)
+        else writes.push([w[j][2] & 15, g]);
+      }
+      if (j - i >= 15) {
+        for (const x of writes) x[1] = Math.min(SMP_GAP, Math.round(x[1] * 985248 / clock));
+        writes.push([w[j][2] & 15, median(writes.map(x => x[1]))]);   // (the last holds as long as the others did)
+        bursts.push({ t: w[i][0] / clock, writes });
+      }
+      i = j + 1;
+    }
+  }
+  // (not the last step: Arkanoid sets the volume once more after each, a value of its own)
+  const same = (a, b) => { const n = Math.min(a.length, b.length) - 1; return Math.abs(a.length - b.length) <= 2 && a.slice(0, n).every((x, i) =>
+    Math.abs(x[1] - b[i][1]) <= 8 && (!i || (x[0] - a[i - 1][0] & 15) === (b[i][0] - b[i - 1][0] & 15))); };
+  const groups = [];
+  for (const b of bursts.sort((x, y) => x.t - y.t)) {
+    const g = groups.find(x => same(x.writes, b.writes));
+    if (g) g.at.push(b.t); else groups.push({ writes: b.writes, at: [b.t] });
+  }
+  groups.sort((a, b) => b.at.length - a.at.length);
+  const samples = [];
+  let room = KIT_WRITES;
+  for (const g of groups) if (samples.length < KIT_MAX && g.writes.length <= room) { samples.push(g); room -= g.writes.length; }
+  const hits = samples.flatMap((s, k) => s.at.map(t => ({ t, k }))).sort((a, b) => a.t - b.t);
+  return { samples: samples.map(s => ({ writes: s.writes, hits: s.at.length })), hits };
+}
+// a tune as MIDI for the FM-1's voices mode (docs/MIDI.md 1): SID voice n on channel n, its instrument's slot by
+// program change, a note at each gate, and what the pitch does that the patch does not (slides) as pitch bend;
+// samples' hits (sidSamples) as channel 10's notes, 36 on. events: [{ t: seconds, m: [bytes] }] in time order
+const BEND_RANGE = 12;
+function sidMidi(t, run, res, slotOf, hits = []) {
+  const calls = sidCalls(run), clock = t.clock === 2 ? 1022727 : 985248, per = run.rate / 50, out = [], at = c => c / run.rate;
+  const put = (c, m) => out.push({ t: at(c), m, k: out.length });
+  for (let ch = 0; ch < 6; ch++) put(0, [0xB0 | ch, 101, 0]), put(0, [0xB0 | ch, 100, 0]), put(0, [0xB0 | ch, 6, BEND_RANGE]), put(0, [0xE0 | ch, 0, 64]);
+  for (let vi = 0; vi < 6; vi++) {
+    const list = res.notes.filter(n => n.vi === vi).sort((a, b) => a.call - b.call);
+    let prog = -1, bend = 0;
+    list.forEach((n, k) => {
+      const f = res.instruments[n.inst].fields, slot = slotOf(n.inst), next = k + 1 < list.length ? list[k + 1].call : calls.length;
+      const end = Math.min(n.off, next), key = f.wt_abs ? 60 : n.base;
+      if (key < 0 || key > 127) return;
+      if (slot >= 0 && slot !== prog) { put(n.call, [0xC0 | vi, slot]); prog = slot; }
+      // the pitch about the patch's own (its step's note, fine tune), averaged over a vibrato cycle
+      const d = [];
+      for (let c = n.call, pos = 0, j = 0; c < end; c++, j++) {
+        if (j && j % Math.max(1, Math.round(per)) === 0 && f.wt_len && ++pos >= f.wt_len) pos = f.wt_loop < f.wt_len ? f.wt_loop : f.wt_len - 1;
+        const s = calls[c], p = notePitch(vreg(s, vi, 0) | vreg(s, vi, 1) << 8, clock), ctl = f.wt_len && f.wt_ctl[pos] || f.wave;
+        d.push(p < 0 || ctl & 0x80 || f.wt_abs >> pos & 1 ? NaN : p - n.base - (f.wt_len ? f.wt_note[pos] << 24 >> 24 : 0) - f.fine / 100);
+      }
+      const cyc = f.vib_depth ? Math.max(1, Math.round(256 / Math.max(1, f.vib_speed) * per)) : 1;
+      if (bend) { put(n.call, [0xE0 | vi, 0, 64]); bend = 0; }
+      put(n.call, [0x90 | vi, key, 100]);
+      for (let j = 1; j < d.length; j++) {
+        let sum = 0, cnt = 0;
+        for (let i = Math.max(0, j - (cyc >> 1)), e = Math.min(d.length, i + cyc); i < e; i++) if (d[i] === d[i]) { sum += d[i]; cnt++; }
+        if (!cnt) continue;
+        const v = Math.abs(sum / cnt) < 0.25 ? 0 : clamp(sum / cnt, -BEND_RANGE, BEND_RANGE);
+        const b = clamp(Math.round(v / BEND_RANGE * 8192), -8192, 8191);
+        if (Math.abs(b - bend) >= 8192 / BEND_RANGE / 16 || (!b && bend)) { put(n.call + j, [0xE0 | vi, b + 8192 & 127, b + 8192 >> 7]); bend = b; }
+      }
+      put(end, [0x80 | vi, key, 0]);
+    });
+  }
+  for (const h of hits) out.push({ t: h.t, m: [0x99, 36 + h.k, 100], k: out.length }, { t: h.t + 0.05, m: [0x89, 36 + h.k, 0], k: out.length + 1 });
+  return out.sort((a, b) => a.t - b.t || a.k - b.k).map(({ t, m }) => ({ t, m }));
+}
+function midiFile(events, name) {               // a standard MIDI file, one track: 120 bpm, 480 a beat (960 ticks a second)
+  const vlq = n => { const b = [n & 127]; while (n >>= 7) b.unshift(n & 127 | 128); return b; };
+  const be = (n, k) => Array.from({ length: k }, (_, i) => n >>> 8 * (k - 1 - i) & 255);
+  const trk = [], nm = [...String(name)].map(c => c.charCodeAt(0) & 127);
+  let last = 0;
+  const ev = (tick, m) => { trk.push(...vlq(tick - last), ...m); last = tick; };
+  ev(0, [0xFF, 0x03, ...vlq(nm.length), ...nm]);
+  ev(0, [0xFF, 0x51, 3, 0x07, 0xA1, 0x20]);
+  for (const e of events) ev(Math.round(e.t * 960), e.m);
+  ev(last, [0xFF, 0x2F, 0]);
+  return new Uint8Array([0x4D, 0x54, 0x68, 0x64, ...be(6, 4), 0, 0, 0, 1, ...be(480, 2), 0x4D, 0x54, 0x72, 0x6B, ...be(trk.length, 4), ...trk]);
+}
+// ==== sidpatch end
+
+// ---- the keyboard: notes on channel 1 (any channel plays the patch)
+const held = new Set();
+function noteOn(n) {
+  if (n < 0 || n > 127 || held.has(n)) return;
+  held.add(n);
+  send([0x9F, n, state.vel]);                   // (channel 16: the edited part, as the FM-1's keys)
+  document.querySelector(`.key[data-n="${n}"]`)?.classList.add("down");
+}
+function noteOff(n) {
+  if (!held.delete(n)) return;
+  send([0x8F, n, 0]);
+  document.querySelector(`.key[data-n="${n}"]`)?.classList.remove("down");
+}
+const isBlack = n => [1, 3, 6, 8, 10].includes(n % 12);
+function buildKeys() {
+  const kb = $("kb"), first = 12 * (state.oct + 1), W = 34;
+  kb.innerHTML = "";
+  let x = 0;
+  for (let n = first; n < first + 37; n++) {
+    const k = el("div", { class: isBlack(n) ? "key b" : "key w" });
+    k.dataset.n = n;
+    if (isBlack(n)) { k.style.left = (x - 11) + "px"; k.style.width = "22px"; }
+    else { k.style.left = x + "px"; k.style.width = W + "px"; x += W; if (n % 12 === 0) k.textContent = "C" + (n / 12 - 1); }
+    kb.append(k);
+  }
+  kb.style.width = x + "px";
+  $("octv").textContent = "C" + state.oct;
+}
+const pointerNote = new Map();
+$("kb").addEventListener("pointerdown", e => { const k = e.target.closest(".key"); if (!k) return; $("kb").setPointerCapture(e.pointerId); pointerNote.set(e.pointerId, +k.dataset.n); noteOn(+k.dataset.n); });
+$("kb").addEventListener("pointermove", e => {
+  if (!pointerNote.has(e.pointerId)) return;
+  const k = document.elementFromPoint(e.clientX, e.clientY)?.closest(".key"), n = k ? +k.dataset.n : null, prev = pointerNote.get(e.pointerId);
+  if (n !== prev) { noteOff(prev); if (n !== null) { noteOn(n); pointerNote.set(e.pointerId, n); } }
+});
+const endPointer = e => { if (pointerNote.has(e.pointerId)) { noteOff(pointerNote.get(e.pointerId)); pointerNote.delete(e.pointerId); } };
+$("kb").addEventListener("pointerup", endPointer);
+$("kb").addEventListener("pointercancel", endPointer);
+const KEYMAP = { z: 0, s: 1, x: 2, d: 3, c: 4, v: 5, g: 6, b: 7, h: 8, n: 9, j: 10, m: 11, ",": 12,
+                 q: 12, 2: 13, w: 14, 3: 15, e: 16, r: 17, 5: 18, t: 19, 6: 20, y: 21, 7: 22, u: 23, i: 24 };
+const kbdHeld = new Map();
+addEventListener("keydown", e => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.target.matches("input, select, textarea") || e.target.closest(".menu") || $("tab-editor").classList.contains("hide")) return;
+  const off = KEYMAP[e.key.toLowerCase()];
+  if (off === undefined) return;
+  const n = 12 * (state.oct + 1) + off;
+  kbdHeld.set(e.key.toLowerCase(), n); noteOn(n);
+});
+addEventListener("keyup", e => { const n = kbdHeld.get(e.key.toLowerCase()); if (n !== undefined) { noteOff(n); kbdHeld.delete(e.key.toLowerCase()); } });
+addEventListener("blur", () => { for (const n of kbdHeld.values()) noteOff(n); kbdHeld.clear(); });
+$("octdn").onclick = () => { if (state.oct > 0) { state.oct--; buildKeys(); } };
+$("octup").onclick = () => { if (state.oct < 7) { state.oct++; buildKeys(); } };
+$("panic").onclick = () => { held.clear(); for (let c = 0; c < 16; c++) send([0xB0 | c, 123, 0]); buildKeys(); };   // (all notes off, every part)
+
+// ---- the Setup tab: the parts as Single, Layer or Split, or the six voices (docs/MIDI.md 1, 2.5)
+const CH_OFF = 16, CH_ALL = 17;
+async function partCC(p, c, v) {                // pick part p, then a setup CC, again until 2F p
+  for (let t = 0; t < 8; t++) {
+    const r = link.wait("partok", x => x === p, 400);
+    send([0xBF, 0x20, p, 0xBF, c, v & 127]);
+    try { await r; return; } catch (e) { /* lost: again */ }
+  }
+  throw new Error("the FM-1 did not answer");
+}
+async function readParts() {
+  for (let p = 0; p < 6; p++) {
+    let got = null;
+    for (let t = 0; t < 5 && !got; t++) {
+      const r = link.wait("partread", x => x.p === p, 500);
+      cc16(0x27, p);
+      got = await r.catch(() => null);
+    }
+    if (!got) throw new Error("the FM-1 did not send part " + (p + 1));
+    state.parts[p] = { chan: got[0x21], slot: got[0x25] };
+    state.mode = got[0x26];
+    state.edPart = got[0x2E];
+  }
+  state.partsKnown = true;
+  renderSetup(); renderEditor();
+}
+async function setMode(m) { await control(0x26, m, "partok", x => x === 0x7F); state.mode = m; }
+async function setEdPart(p) { await control(0x2E, p, "partok", x => x === 0x7E); state.edPart = p; }
+function setupKind() {                          // as the FM-1's setup_kind
+  const ps = state.parts, on = ps.filter(x => x.chan !== CH_OFF), all = on.filter(x => x.chan === CH_ALL);
+  if (on.length === all.length && all.length === 1 && ps[0].chan === CH_ALL) return "single";
+  if (on.length === all.length && all.length) return "layer";
+  if (!all.length && on.length) return "split";
+  return "mixed";
+}
+function multiUsed() { return state.mode !== 0 || setupKind() !== "single"; }
+function partMoved(p, s) {                      // the FM-1 changed a part's slot (PRESETS, a program change)
+  if (p > 5 || state.parts[p].slot === s) return;
+  state.parts[p].slot = s;
+  if (!$("tab-setup").classList.contains("hide")) renderSetup();
+}
+const isFiltered = s => !!(state.lib[s] && state.lib[s][F.flags] & PF_FILTER);
+const SETUPS = [["single", "Single", "One patch on every MIDI channel and the FM-1's keys: the plain synth."],
+  ["layer", "Layer", "Up to six patches stacked, all playing each note."],
+  ["split", "Split", "Each MIDI channel plays its own patch: for a sequencer or DAW."],
+  ["voices", "Voices", "MIDI channels 1 to 6 are the six voices, one note each, as a C64 tune plays them."]];
+function renderSetup() {
+  const ps = state.parts, kind = state.mode === 1 ? "voices" : setupKind(), used = state.lib.map((b, s) => ({ b, s })).filter(x => x.b);
+  const cards = $("setups");
+  cards.innerHTML = "";
+  for (const [k, name, what] of SETUPS)
+    cards.append(el("button", { class: k === kind ? "on" : "", onclick: () => k !== kind && job("Setting", async () => {
+      await useSetup(k); renderSetup(); renderEditor(); setStatus(`${name}. Save to keep it after power off.`, "ok");
+    }) }, el("b", {}, name), el("span", {}, what)));
+  const body = $("setupbody");
+  body.innerHTML = "";
+  if (!state.partsKnown) { body.append(el("p", { class: "sub" }, "The FM-1's setup is not read yet: connect it, or press Read FM-1.")); return; }
+  const set = (p, c, v, k) => job("Setting", async () => { await partCC(p, c, v); ps[p][k] = v; renderSetup(); setStatus("Set.", "ok"); });
+  const patch = p => {
+    const x = el("select", { "aria-label": `Part ${p + 1}'s patch`, onchange: e => set(p, 0x25, +e.target.value, "slot") });
+    if (!state.lib[ps[p].slot]) x.add(new Option(`${slotName(ps[p].slot)} (empty)`, ps[p].slot));
+    for (const u of used) x.add(new Option(`${slotName(u.s)} ${nameOf(u.b)}${u.b[F.flags] & PF_FILTER ? " (filter)" : ""}`, u.s));
+    x.value = ps[p].slot;
+    return x;
+  };
+  const edit = p => p === state.edPart ? el("span", { class: "cap", style: "color:var(--good)" }, "Editing") :
+    el("button", { class: "btn small", onclick: () => job("Setting", async () => {
+      await setEdPart(p); await follow(); renderSetup();
+      setStatus(`Part ${p + 1} is the edited one: the Editor, this page's keys and the FM-1's keys and knobs play it.`, "ok");
+    }) }, "Edit");
+  const drop = p => p ? el("button", { class: "btn small", onclick: () => set(p, 0x21, CH_OFF, "chan") }, "Remove") : "";
+  const free = ps.findIndex(x => x.chan === CH_OFF);
+  const add = (label, chan) => el("button", { class: "btn", style: "align-self:flex-start", disabled: free < 0, onclick: () => job("Setting", async () => {
+    await partCC(free, 0x25, ps[0].slot); ps[free].slot = ps[0].slot;
+    await partCC(free, 0x21, chan); ps[free].chan = chan;
+    renderSetup(); setStatus("Added: pick its patch.", "ok");
+  }) }, label);
+  const table = (head, rows) => el("div", { class: "tablewrap" }, el("table", { class: "parts" }, el("tr", {}, head.map(h => el("th", {}, h))), rows));
+  const row = (p, ...cells) => el("tr", { class: p === state.edPart ? "ed" : "" }, cells.map(c => el("td", {}, c)));
+  const on = ps.map((x, p) => p).filter(p => kind === "voices" || ps[p].chan !== CH_OFF);
+  if (kind === "voices") {
+    body.append(el("p", { class: "sub" }, "MIDI channel n plays voice n, one note at a time, with its own patch and pitch bend. Voices 1 to 3 are chip 1 and 4 to 6 chip 2, as in a C64 tune."),
+      table(["VOICE", "CHIP", "MIDI CHANNEL", "PATCH", ""], ps.map((x, p) => row(p, String(p + 1), String((p / 3 | 0) + 1), String(p + 1), patch(p), edit(p)))));
+  } else if (kind === "single") {
+    body.append(el("p", { class: "sub" }, "Part 1's patch plays on MIDI channels 1 to 9 and 11 to 15 and from the FM-1's keys. PRESETS and the Editor change it."),
+      el("div", { class: "row", style: "gap:12px;align-items:center" }, el("span", { class: "cap" }, "PATCH"), patch(0)));
+  } else if (kind === "layer") {
+    body.append(el("p", { class: "sub" }, "Every layer plays each note on MIDI channels 1 to 9 and 11 to 15. The FM-1's keys play the edited part alone. All share the six voices."),
+      table(["LAYER", "PATCH", "", ""], on.map((p, i) => row(p, String(i + 1), patch(p), edit(p), drop(p)))), add("Add a layer", CH_ALL));
+  } else if (kind === "split") {
+    const taken = new Set(on.map(p => ps[p].chan)), next = [...Array(15).keys()].find(c => !taken.has(c)) ?? 0;
+    body.append(el("p", { class: "sub" }, "Each MIDI channel plays its patch; two rows on one channel play together. The FM-1's keys play the edited part. All share the six voices."),
+      table(["MIDI CHANNEL", "PATCH", "", ""], on.slice().sort((a, b) => ps[a].chan - ps[b].chan).map(p => {
+        const ch = el("select", { "aria-label": `Part ${p + 1}'s MIDI channel`, onchange: e => set(p, 0x21, +e.target.value, "chan") });
+        for (let c = 0; c < 15; c++) ch.add(new Option(`Channel ${c + 1}` + (c === 9 ? " (with the sample kit)" : ""), c));
+        ch.value = ps[p].chan;
+        return row(p, ch, patch(p), edit(p), drop(p));
+      })), add("Add a channel", next));
+  } else {
+    body.append(el("p", { class: "sub" }, "The parts are a mix of layers and channels. Pick Single, Layer or Split above to start again from part 1."),
+      table(["PART", "MIDI CHANNEL", "PATCH", ""], ps.map((x, p) => row(p, String(p + 1), x.chan === CH_OFF ? "Off" : x.chan === CH_ALL ? "All" : String(x.chan + 1), patch(p), edit(p)))));
+  }
+  // each chip has one filter: say where filtered patches have to share one
+  const filt = on.filter(p => isFiltered(ps[p].slot)), say = (t, cls) => body.append(el("p", { class: cls || "sub" }, t));
+  if (kind === "voices") {
+    for (const c of [0, 1]) {
+      const f = filt.filter(p => (p / 3 | 0) === c);
+      if (f.length > 1) say(`Voices ${f.map(p => p + 1).join(" and ")} share chip ${c + 1}'s filter: the newest note's patch sets it.`, "warn");
+    }
+  } else if (filt.length > 2) say(`${filt.length} filtered patches share the two chips' filters: where two meet on a chip, the newest note's patch sets it.`, "warn");
+  else if (filt.length === 2) say("The two filtered patches get a chip each (three voices), so each keeps its own filter.");
+}
+async function useSetup(kind) {                 // part 1 kept; the other parts that are on carried over, else one added
+  if (kind === "voices") { await setMode(1); return; }
+  if (state.mode !== 0) await setMode(0);
+  const ps = state.parts, on = ps.map((x, p) => p).filter(p => p === 0 || ps[p].chan !== CH_OFF), keep = on.length > 1 ? on : [0, 1];
+  if (kind !== "single" && on.length === 1) { await partCC(1, 0x25, ps[0].slot); ps[1].slot = ps[0].slot; }
+  for (let p = 0; p < 6; p++) {
+    const chan = kind === "single" ? (p ? CH_OFF : CH_ALL) : !keep.includes(p) ? CH_OFF : kind === "layer" ? CH_ALL : keep.indexOf(p);
+    if (chan !== ps[p].chan) { await partCC(p, 0x21, chan); ps[p].chan = chan; }
+  }
+  if (kind === "single" && state.edPart) { await setEdPart(0); await follow(); }
+}
+$("readparts").onclick = () => shownJob("Reading", async () => { setStatus("Reading the setup..."); await readParts(); setStatus("Setup read.", "ok"); });
+$("keepparts").onclick = () => shownJob("Saving", async () => { await keep(); setStatus("Setup saved.", "ok"); });
+
+// ---- tabs
+function showTab(name) {
+  for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("on", b.dataset.tab === name);
+  for (const t of document.querySelectorAll(".tab")) t.classList.toggle("hide", t.id !== "tab-" + name);
+}
+for (const b of document.querySelectorAll("#nav button")) b.onclick = () => showTab(b.dataset.tab);
+$("nav").querySelector('[data-tab="setup"]').addEventListener("click", () => { if (state.fw && !busy) job("Reading", readParts); });
+
+buildKeys(); renderImport(); renderEditor(); renderSetup(); startMidi();
+</script>
+</body>
+</html>
