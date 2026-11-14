@@ -207,3 +207,5 @@ to get its source. The SID core is GPL-2.0-or-later, and third-party parts keep 
 
 SID-1 is an independent project. It is not made, endorsed or supported by Commodore's owners, M-VAVE, or the authors
 of the projects above. Commodore 64 is a trademark of its owners; M-VAVE and FM-1 belong to theirs.
+
+You can also try SID-1 in the browser, no flashing needed, in the free community [FM-1 Emulator](https://fm1-emulator.atst.tools/).
